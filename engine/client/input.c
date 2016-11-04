@@ -644,9 +644,30 @@ void IN_EngineAppendMove( float frametime, usercmd_t *cmd, qboolean active )
 		cl.refdef.cl_viewangles[PITCH] += dpitch * sensitivity;
 		cl.refdef.cl_viewangles[PITCH] = bound( -90, cl.refdef.cl_viewangles[PITCH], 90 );
 	}
-
-
 }
+
+/*
+==================
+IN_MouseMove
+
+==================
+*/
+void IN_MouseFinalizeMove( float *pitch, float *yaw )
+{
+	int dx = 0;
+	int dy = 0;
+
+	if( !in_mouseinitialized )
+		return;
+
+#if XASH_INPUT == INPUT_SDL
+	SDL_GetRelativeMouseState( &dx, &dy );
+#endif
+
+	*pitch += dy * m_pitch->value;
+	*yaw   -= dx * m_yaw->value; // mouse speed
+}
+
 /*
 ==================
 Host_InputFrame
@@ -664,16 +685,9 @@ void Host_InputFrame( void )
 #endif
 	if( clgame.dllFuncs.pfnLookEvent )
 	{
-		int dx, dy;
-
 #ifndef __ANDROID__
-		if( in_mouseinitialized )
-		{
-			SDL_GetRelativeMouseState( &dx, &dy );
-			pitch += dy * m_pitch->value, yaw -= dx * m_yaw->value; //mouse speed
-		}
+		IN_MouseFinalizeMove( &yaw, &pitch );
 #endif
-
 		Joy_FinalizeMove( &forward, &side, &yaw, &pitch );
 		IN_TouchMove( &forward, &side, &yaw, &pitch );
 		clgame.dllFuncs.pfnLookEvent( yaw, pitch );
