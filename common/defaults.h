@@ -53,7 +53,7 @@ SETUP BACKENDS DEFINATIONS
 			#define XASH_SOUND SOUND_SDL
 		#endif
 
-	#endif //XASH_SDL
+	#endif // XASH_SDL
 
 	#if defined __ANDROID__ && !defined XASH_SDL
 
@@ -72,7 +72,26 @@ SETUP BACKENDS DEFINATIONS
 		#ifndef XASH_SOUND
 			#define XASH_SOUND SOUND_OPENSLES
 		#endif
-	#endif // android case
+	#endif // ANDROID
+	
+	#if (defined TIZEN || defined __TIZEN__) && !defined XASH_SDL
+
+		#ifndef XASH_VIDEO
+			#define XASH_VIDEO VIDEO_TIZEN
+		#endif
+
+		#ifndef XASH_TIMER
+			#define XASH_TIMER TIMER_LINUX
+		#endif
+
+		#ifndef XASH_INPUT
+			#define XASH_INPUT INPUT_TIZEN
+		#endif
+
+		#ifndef XASH_SOUND
+			#define XASH_SOUND SOUND_TIZEN
+		#endif
+	#endif // TIZEN	
 
 #endif // XASH_DEDICATED
 
@@ -121,7 +140,7 @@ Default build-depended cvar and constant values
 =========================================================================
 */
 
-#ifdef __ANDROID__
+#if defined __ANDROID__ || defined TIZEN
 	#define DEFAULT_TOUCH_ENABLE "1"
 #else
 	#define DEFAULT_TOUCH_ENABLE "0"
