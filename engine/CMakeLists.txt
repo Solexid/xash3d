@@ -27,6 +27,7 @@ file( GLOB_RECURSE XASH_ENGINE_SOURCES common/*.c server/*.c ) # Minimal sources
 file( GLOB_RECURSE XASH_ENGINE_WIN32_SOURCES platform/win32/*.c ) # Win32 only sources
 file( GLOB_RECURSE XASH_ENGINE_SDL_SOURCES platform/sdl/*.c ) # SDL version sources
 file( GLOB_RECURSE XASH_ENGINE_ANDROID_SOURCES platform/android/*.c ) # Android sources
+file( GLOB_RECURSE XASH_ENGINE_TIZEN_SOURCES platform/tizen/*.c ) # Android sources
 file( GLOB_RECURSE XASH_ENGINE_CLIENT_SOURCES client/*.c ) # Client sources
 
 # TODO: How to evaluate expression in set?
@@ -45,6 +46,7 @@ endmacro( cond_list_append )
 cond_list_append( WIN32 XASH_ENGINE_SOURCES XASH_ENGINE_WIN32_SOURCES )
 cond_list_append( XASH_SDL XASH_ENGINE_SOURCES XASH_ENGINE_SDL_SOURCES )
 cond_list_append( ANDROID XASH_ENGINE_SOURCES XASH_ENGINE_ANDROID_SOURCES )
+cond_list_append( TIZEN XASH_ENGINE_SOURCES XASH_ENGINE_TIZEN_SOURCES )
 cond_list_append( _XASH_CLIENT XASH_ENGINE_SOURCES XASH_ENGINE_CLIENT_SOURCES )
 
 include_directories ( . common/ common/imagelib/  common/soundlib/ client/ client/vgui/ server/ ../common ../pm_shared )
