@@ -137,6 +137,9 @@ else( )
 	add_definitions( -DXASH_RELEASE )
 endif( )
 
+if( TIZEN )
+	target_link_libraries( ${XASH_ENGINE_LIBRARY} -lcapi-media-audio-io )
+endif( )
 
 target_link_libraries( ${XASH_ENGINE_LIBRARY} -lm )
 

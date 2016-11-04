@@ -53,6 +53,7 @@ set(CMAKE_EXE_LINKER_FLAGS "--sysroot=${CMAKE_SYSROOT}")
 set(CMAKE_CROSSCOMPILING 1)
 
 add_definitions("-DTIZEN -D__TIZEN__")
+include_directories(${CMAKE_SYSROOT}/usr/include/media)
 
 # Xash3D preferred settings
 set(XASH_SDL OFF CACHE BOOLEAN "")
@@ -61,3 +62,4 @@ set(XASH_VGUI OFF CACHE BOOLEAN "")
 set(XASH_DLL_LOADER OFF CACHE BOOLEAN "")
 set(XASH_GLES ON CACHE BOOLEAN "")
 set(XASH_NANOGL ON CACHE BOOLEAN "")
+
