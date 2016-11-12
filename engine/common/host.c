@@ -995,17 +995,48 @@ void Host_FreeCommon( void )
 
 	Mem_FreePool( &host.mempool );
 }
+
+/*
+==============
+Host_RunFrames
+
+Main loop function
+==============
+*/
+int Host_RunFrames( void )
+{
+	static double oldtime, newtime;
+	oldtime = Sys_DoubleTime();
+
+	// main window message loop
+	while( !host.crashed && !host.shutdown_issued )
+	{
+#if XASH_INPUT == INPUT_SDL
+		SDLash_RunEvents();
+#elif XASH_INPUT == INPUT_ANDROID
+		Android_RunEvents();
+#elif XASH_INPUT == INPUT_TIZEN
+		// Nothing.
+#endif
+		newtime = Sys_DoubleTime ();
+		Host_Frame( newtime - oldtime );
+
+		oldtime = newtime;
+	}
+
+	// maybe never reached
+	return 0;
+}
+
 /*
 =================
 Host_Main
+
+Main engine entry point
 =================
 */
 int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bChangeGame, pfnChangeGame func )
 {
-	static double	oldtime, newtime;
-#ifdef XASH_SDL
-	SDL_Event event;
-#endif
 	pChangeGame = func;	// may be NULL
 
 	Host_InitCommon( argc, argv, progname, bChangeGame );
@@ -1013,10 +1044,10 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 	// init commands and vars
 	if( host.developer >= 3 )
 	{
-		Cmd_AddCommand ( "sys_error", Sys_Error_f, "just throw a fatal error to test shutdown procedures");
-		Cmd_AddCommand ( "host_error", Host_Error_f, "just throw a host error to test shutdown procedures");
-		Cmd_AddCommand ( "crash", Host_Crash_f, "a way to force a bus error for development reasons");
-		Cmd_AddCommand ( "net_error", Net_Error_f, "send network bad message from random place");
+		Cmd_AddCommand( "sys_error", Sys_Error_f, "just throw a fatal error to test shutdown procedures");
+		Cmd_AddCommand( "host_error", Host_Error_f, "just throw a host error to test shutdown procedures");
+		Cmd_AddCommand( "crash", Host_Crash_f, "a way to force a bus error for development reasons");
+		Cmd_AddCommand( "net_error", Net_Error_f, "send network bad message from random place");
 	}
 
 	host_cheats = Cvar_Get( "sv_cheats", "0", CVAR_LATCH, "allow usage of cheat commands and variables" );
@@ -1141,36 +1172,25 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 	// exec all files from userconfig.d 
 	Host_Userconfigd_f();
 
-	oldtime = Sys_DoubleTime();
 	IN_TouchInitConfig();
 	SCR_CheckStartupVids();	// must be last
-#ifdef XASH_SDL
+
+#if XASH_INPUT == INPUT_SDL
 	SDL_StopTextInput(); // disable text input event. Enable this in chat/console?
 #endif
-#if defined(__ANDROID__) && !defined( XASH_SDL ) && !defined(XASH_DEDICATED)
+
+#if defined(__ANDROID__) && !defined( XASH_SDL ) && !defined( XASH_DEDICATED )
 	Android_Init();
 #endif
 
 	if( host.state == HOST_INIT )
 		host.state = HOST_FRAME; // initialization is finished
 
-	// main window message loop
-	while( !host.crashed && !host.shutdown_issued )
-	{
-#if XASH_INPUT == INPUT_SDL
-		while( !host.crashed && !host.shutdown_issued && SDL_PollEvent( &event ) )
-			SDLash_EventFilter( &event );
-#elif XASH_INPUT == INPUT_ANDROID
-		Android_RunEvents();
-#endif
-		newtime = Sys_DoubleTime ();
-		Host_Frame( newtime - oldtime );
-
-		oldtime = newtime;
-	}
-
-	// never reached
+#ifndef TIZEN
+	return Host_RunFrames();
+#else
 	return 0;
+#endif
 }
 
 /*

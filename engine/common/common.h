@@ -698,6 +698,7 @@ int Q_buildnum_compat( void );
 // host.c
 //
 void EXPORT Host_Shutdown( void );
+int Host_RunFrames( void );
 void Host_SetServerState( int state );
 int Host_ServerState( void );
 int Host_CompareFileTime( int ft1, int ft2 );
@@ -706,9 +707,10 @@ qboolean Host_NewGame( const char *mapName, qboolean loadGame );
 void Host_EndGame( const char *message, ... );
 #ifdef __GNUC__
 void EXPORT Host_AbortCurrentFrame( void ) __attribute__ ((noreturn)) __attribute__ ((noinline)) ;
-#endif
-#ifdef _MSC_VER
+#elif _MSC_VER
 __declspec(noreturn) void EXPORT Host_AbortCurrentFrame( void );
+#else
+void EXPORT Host_AbortCurrentFrame( void );
 #endif
 void Host_RestartAmbientSounds( void );
 void Host_RestartDecals( void );

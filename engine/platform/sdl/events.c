@@ -159,6 +159,18 @@ void SDLash_EnableTextInput( int enable, qboolean force )
 	}
 }
 
+void SDLash_RunEvents( void )
+{
+	static SDL_Event event;
+
+	while( !host.crashed &&
+		   !host.shutdown_issued &&
+		   SDL_PollEvent( &event ) )
+	{
+		SDLash_EventFilter( &event );
+	}
+}
+
 void SDLash_EventFilter( void *ev )
 {
 	SDL_Event *event = (SDL_Event*)ev;
