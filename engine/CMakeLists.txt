@@ -137,8 +137,55 @@ else( )
 	add_definitions( -DXASH_RELEASE )
 endif( )
 
+if( XASH_NANOGL )
+	add_subdirectory( nanogl )
+	include_directories( nanogl/ nanogl/GL )
+	target_link_libraries( ${XASH_ENGINE_LIBRARY} nanogl )
+endif()
+
 if( TIZEN )
-	target_link_libraries( ${XASH_ENGINE_LIBRARY} -lcapi-media-audio-io )
+	# Tizen SDK don't have some packages needed for pkg-config.
+	# Krivozhopie pidory
+
+	# include( FindPkgConfig )
+	# set(ENV{PKG_CONFIG_LIBDIR} ${CMAKE_SYSROOT}/usr/lib/pkgconfig/)
+	# pkg_check_modules( TIZEN_MEDIA  REQUIRED capi-media-audio-io )
+	# pkg_check_modules( TIZEN_APPFW  REQUIRED capi-appfw-app-common )
+	# pkg_check_modules( TIZEN_ELM    REQUIRED elementary )
+	# pkg_check_modules( TIZEN_SYS    REQUIRED system )
+	# pkg_check_modules( TIZEN_EFLEXT REQUIRED efl-extension )
+	# pkg_check_modules( TIZEN_DLOG   REQUIRED dlog )
+	# pkg_check_modules( TIZEN_EVAS   REQUIRED evas )
+
+	# Make sure you have CMAKE_SYSROOT pointing at valid Tizen rootstrap
+	set( I ${CMAKE_SYSROOT}/usr/include )
+
+	include_directories(
+		# EFL related... things
+		${I}/efl-1/ ${I}/eina-1/ ${I}/eina-1/eina/
+		${I}/eet-1/ ${I}/eo-1/ ${I}/ecore-1/ ${I}/ecore-evas-1/
+		${I}/ecore-file-1/ ${I}/ecore-input-1/ ${I}/ecore-imf-1/
+		${I}/ecore-con-1/ ${I}/edje-1/ ${I}/eldbus-1/ ${I}/efreet-1/
+		${I}/ethumb-1/ ${I}/ethumb-client-1/ ${I}/elementary-1/
+		${I}/evas-1/ ${I}/../lib/dbus-1.0/include/ ${I}/dbus-1.0/
+		${I}/e_dbus-1/
+
+		# Tizen Native API
+		${I}/media/ ${I}/appfw/ ${I}/system/ ${I}/efl-extension/
+		${I}/dlog/
+		)
+	
+	target_link_libraries( ${XASH_ENGINE_LIBRARY} 
+		-levas -lelementary
+
+		-lcapi-media-audio-io 
+		-lcapi-appfw-application
+		-lcapi-system-system-settings
+		-ldlog
+		-lefl-extension
+		)
+
+	unset( I )
 endif( )
 
 target_link_libraries( ${XASH_ENGINE_LIBRARY} -lm )
