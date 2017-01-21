@@ -62,6 +62,49 @@ extern int UI_IsVisible( void );
 extern int UI_CreditsActive( void );
 extern void UI_FinalCredits( void );
 
+// exports
+void UI_StartLoadingProgressBar( const char *type, int progressPoints );
+void UI_ContinueLoadingProgressBar( const char *type, int progressPoint, float fraction );
+void UI_SetLoadingProgressBarStatusText( const char *text );
+void UI_StopLoadingProgressBar( void );
+void UI_SetSecondaryProgressBar( float progress );
+void UI_SetSecondaryProgressBarText( const char *text );
+void UI_OnDisconnectFromServer( int reason, const char *text );
+
+class CLoadingProgressBar
+{
+public:
+	CLoadingProgressBar();
+	~CLoadingProgressBar();
+	void Draw();
+	void Reset();
+	bool IsActive() { return m_bActive; }
+
+	// exports
+	friend void UI_StartLoadingProgressBar( const char *type, int progressPoints );
+	friend void UI_ContinueLoadingProgressBar( const char *type, int progressPoint, float fraction );
+	friend void UI_SetLoadingProgressBarStatusText( const char *text );
+	friend void UI_StopLoadingProgressBar( void );
+	friend void UI_SetSecondaryProgressBar( float progress );
+	friend void UI_SetSecondaryProgressBarText( const char *text );
+	friend void UI_OnDisconnectFromServer( int reason, const char *text );
+private:
+	int m_iProgressPoints;
+	int m_iProgressPoint;
+	int m_iDisconnectReason;
+	float m_flFrac;
+
+	float m_flSecondaryProgress;
+
+	bool m_bActive;
+
+	const char *m_szType;
+	const char *m_szStatus;
+	const char *m_szSecondaryStatus;
+	const char *m_szDisconnectReasonText;
+};
+extern CLoadingProgressBar g_LoadingProgressBar;
+
 #include "cvardef.h"
 
 // ScreenHeight returns the height of the screen, in pixels

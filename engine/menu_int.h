@@ -190,9 +190,46 @@ typedef struct
 	void	(*pfnFinalCredits)( void );	// show credits + game end
 } UI_FUNCTIONS;
 
+enum
+{
+	REASON_UNKNOWN = -1, //
+	REASON_KICKED = 0,// kick
+	REASON_BANNED,    // typical ban
+	REASON_AC_BANNED, // anti-cheat ban
+	REASON_NOLOGIN,   // not logged in
+	REASON_NOCONNECTION, // no internet connection
+	REASON_CONNECTION_FAIL, // network error during connection
+	REASON_NETWORK_ERROR,
+	REASON_VERSION_MISMATCH,
+	REASON_CONSISTENCY, // file consistency check error
+	REASON_INVALID_INPUT_DEVICE // banned input device from server: mouse in cs16client, for example.
+};
+
+#define UI_PROGRESSBAR_FUNCS_VERSION 1
+
+typedef struct
+{
+	int version;
+
+	void (*pfnStartLoadingProgressBar)( const char *type, int progressPoints );
+	void (*pfnContinueLoadingProgressBar)( const char *type, int progressPoint, float fraction );
+	void (*pfnSetLoadingProgressBarStatusText)( const char *text );
+	void (*pfnStopLoadingProgressBar)( void );
+
+	// file downloading during connection
+	void (*pfnSetSecondaryProgressBar)( float progress );
+	void (*pfnSetSecondaryProgressBarText)( const char *text );
+
+	// Shows message box.
+	// reason
+	// text -- may be NULL
+	void (*pfnOnDisconnectFromServer)( int reason, const char *text );
+} UI_PROGRESSBAR_FUNCS;
+
 typedef int (*MENUAPI)( UI_FUNCTIONS *pFunctionTable, ui_enginefuncs_t* engfuncs, ui_globalvars_t *pGlobals );
 
-typedef int (*UITEXTAPI)( ui_textfuncs_t* engfuncs );
+typedef int (*UITEXTAPI)( ui_textfuncs_t *engfuncs );
+typedef int (*UIPROGRESSBARAPI)( UI_PROGRESSBAR_FUNCS *menufuncs );
 
 typedef void (*ADDTOUCHBUTTONTOLIST)( const char *name, const char *texture, const char *command, unsigned char *color, int flags );
 

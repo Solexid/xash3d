@@ -1037,7 +1037,9 @@ qboolean UI_LoadProgs( void )
 	static ui_textfuncs_t	gpTextfuncs;
 	static ui_globalvars_t	gpGlobals;
 	int			i;
-        UITEXTAPI GiveTextApi;
+	UITEXTAPI GiveTextApi;
+	UIPROGRESSBARAPI GetProgressBarAPI;
+
 	if( menu.hInstance ) UI_UnloadProgs();
 
 	// setup globals
@@ -1102,6 +1104,18 @@ qboolean UI_LoadProgs( void )
 	}
 
 	pfnAddTouchButtonToList = (ADDTOUCHBUTTONTOLIST)Com_GetProcAddress( menu.hInstance, "AddTouchButtonToList" );
+
+	if( ( GetProgressBarAPI = (UIPROGRESSBARAPI) Com_GetProcAddress( menu.hInstance, "GetProgressBarAPI" )))
+	{
+		if( GetProgressBarAPI( &menu.pbFuncs ) && menu.pbFuncs.version == UI_PROGRESSBAR_FUNCS_VERSION )
+		{
+			menu.use_progressbar_api = true;
+		}
+		else
+		{
+			MsgDev( D_ERROR, "Failed to initialize MainUI progress bar API\n");
+		}
+	}
 
 	// setup gameinfo
 	for( i = 0; i < SI.numgames; i++ )

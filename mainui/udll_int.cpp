@@ -42,6 +42,18 @@ static UI_FUNCTIONS gFunctionTable =
 	UI_FinalCredits
 };
 
+static UI_PROGRESSBAR_FUNCS gPBFuncs =
+{
+	UI_PROGRESSBAR_FUNCS_VERSION,
+	UI_StartLoadingProgressBar,
+	UI_ContinueLoadingProgressBar,
+	UI_SetLoadingProgressBarStatusText,
+	UI_StopLoadingProgressBar,
+	UI_SetSecondaryProgressBar,
+	UI_SetSecondaryProgressBarText,
+	UI_OnDisconnectFromServer
+};
+
 #ifdef _WIN32
 #define EXPORT __declspec(dllexport)
 #else
@@ -51,7 +63,16 @@ static UI_FUNCTIONS gFunctionTable =
 //=======================================================================
 //			GetApi
 //=======================================================================
-extern "C" EXPORT int GetMenuAPI(UI_FUNCTIONS *pFunctionTable, ui_enginefuncs_t* pEngfuncsFromEngine, ui_globalvars_t *pGlobals)
+
+extern "C"
+{
+EXPORT int GetMenuAPI( UI_FUNCTIONS *pFunctionTable, ui_enginefuncs_t* pEngfuncsFromEngine, ui_globalvars_t *pGlobals );
+EXPORT int GiveTextAPI( ui_textfuncs_t* pTextfuncsFromEngine);
+EXPORT void AddTouchButtonToList( const char *name, const char *texture, const char *command, unsigned char *color, int flags );
+EXPORT int GetProgressBarAPI( UI_PROGRESSBAR_FUNCS *menufuncs );
+}
+
+int GetMenuAPI(UI_FUNCTIONS *pFunctionTable, ui_enginefuncs_t* pEngfuncsFromEngine, ui_globalvars_t *pGlobals)
 {
 	if( !pFunctionTable || !pEngfuncsFromEngine )
 	{
@@ -68,7 +89,7 @@ extern "C" EXPORT int GetMenuAPI(UI_FUNCTIONS *pFunctionTable, ui_enginefuncs_t*
 	return TRUE;
 }
 
-extern "C" EXPORT int GiveTextAPI( ui_textfuncs_t* pTextfuncsFromEngine )
+int GiveTextAPI( ui_textfuncs_t* pTextfuncsFromEngine )
 {
 	if( !pTextfuncsFromEngine )
 	{
@@ -81,8 +102,16 @@ extern "C" EXPORT int GiveTextAPI( ui_textfuncs_t* pTextfuncsFromEngine )
 	return TRUE;
 }
 
-extern "C" EXPORT void AddTouchButtonToList( const char *name, const char *texture, const char *command, unsigned char *color, int flags )
+void AddTouchButtonToList( const char *name, const char *texture, const char *command, unsigned char *color, int flags )
 {
 	UI_TouchButtons_AddButtonToList( name, texture, command, color, flags );
+}
+
+int GetProgressBarAPI( UI_PROGRESSBAR_FUNCS *funcs )
+{
+	if( !funcs ) return FALSE;
+
+	memcpy( funcs, &gPBFuncs, sizeof( gPBFuncs) );
+	return TRUE;
 }
 

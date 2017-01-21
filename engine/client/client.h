@@ -438,6 +438,9 @@ typedef struct
 	int		logo_yres;
 	float		logo_length;
 	qboolean	use_text_api;
+
+	UI_PROGRESSBAR_FUNCS pbFuncs;
+	int use_progressbar_api;
 } menu_static_t;
 
 typedef struct
