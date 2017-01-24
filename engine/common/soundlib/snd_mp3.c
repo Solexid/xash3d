@@ -218,7 +218,7 @@ int Stream_ReadMPG( stream_t *stream, int needBytes, void *buffer )
 	mpeg_t	*mpg;
 
 	mpg = (mpeg_t *)stream->ptr;
-	ASSERT( mpg != NULL );
+	Assert( mpg != NULL );
 
 	while( 1 )
 	{

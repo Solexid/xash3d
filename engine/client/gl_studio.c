@@ -30,7 +30,7 @@ GNU General Public License for more details.
 #define STUDIO_MERGE_TEXTURES
 
 #define EVENT_CLIENT	5000	// less than this value it's a server-side studio events
-#define MAXARRAYVERTS	20000	// used for draw shadows
+#define MAXARRAYVERTS	32768	// used for draw shadows
 #define LEGS_BONES_COUNT	8
 
 static vec3_t hullcolor[8] = 
@@ -143,7 +143,7 @@ R_StudioInit
 */
 void R_StudioInit( void )
 {
-	float	pixelAspect;
+	float	pixelAspect, fov_x = 90.0f, fov_y;
 
 	r_studio_lambert = Cvar_Get( "r_studio_lambert", "2", CVAR_ARCHIVE, "bonelighting lambert value" );
 	r_studio_lerping = Cvar_Get( "r_studio_lerping", "1", CVAR_ARCHIVE, "enables studio animation lerping" );
@@ -161,11 +161,9 @@ void R_StudioInit( void )
 		pixelAspect *= (320.0f / 240.0f);
 	else pixelAspect *= (640.0f / 480.0f);
 
-	if( RI.refdef.fov_y != 0 )
-	{
-		aliasXscale = (float)scr_width->integer / RI.refdef.fov_y;
-		aliasYscale = aliasXscale * pixelAspect;
-	}
+	fov_y = V_CalcFov( &fov_x, scr_width->integer, scr_height->integer );
+	aliasXscale = (float)scr_width->integer / fov_y; // stub
+	aliasYscale = aliasXscale * pixelAspect;
 
 	Matrix3x4_LoadIdentity( g_aliastransform );
 	Matrix3x4_LoadIdentity( g_rotationmatrix );
@@ -266,9 +264,22 @@ static qboolean R_StudioComputeBBox( cl_entity_t *e, vec3_t bbox[8] )
 	// rotate the bounding box
 	VectorCopy( e->angles, angles );
 
+#if 0
 	if( e->player ) angles[PITCH] = 0.0f; // don't rotate player model, only aim
 	AngleVectors( angles, vectors[0], vectors[1], vectors[2] );
+#else
+	vectors[0][0] = g_rotationmatrix[0][0];
+	vectors[0][1] = g_rotationmatrix[1][0];
+	vectors[0][2] = g_rotationmatrix[2][0];
 
+	vectors[1][0] = g_rotationmatrix[0][1];
+	vectors[1][1] = g_rotationmatrix[1][1];
+	vectors[1][2] = g_rotationmatrix[2][1];
+
+	vectors[2][0] = g_rotationmatrix[0][2];
+	vectors[2][1] = g_rotationmatrix[1][2];
+	vectors[2][2] = g_rotationmatrix[2][2];
+#endif
 	// compute a full bounding box
 	for( i = 0; i < 8; i++ )
 	{
@@ -278,7 +289,7 @@ static qboolean R_StudioComputeBBox( cl_entity_t *e, vec3_t bbox[8] )
 
 		// rotate by YAW
 		p2[0] = DotProduct( p1, vectors[0] );
-		p2[1] = DotProduct( p1, vectors[1] );
+		p2[1] = -DotProduct( p1, vectors[1] );
 		p2[2] = DotProduct( p1, vectors[2] );
 
 		if( bbox ) VectorAdd( p2, e->origin, bbox[i] );
@@ -316,7 +327,7 @@ pfnPlayerInfo
 static player_info_t *GAME_EXPORT pfnPlayerInfo( int index )
 {
 	if( cls.key_dest == key_menu && !index )
-		return &menu.playerinfo;
+		return &gameui.playerinfo;
 
 	if( index < 0 || index > cl.maxclients )
 		return NULL;
@@ -876,13 +887,13 @@ void R_StudioCalcBoneQuaterion( int frame, float s, mstudiobone_t *pbone, mstudi
 
 	if( !VectorCompare( angle1, angle2 ))
 	{
-		AngleQuaternion( angle1, q1 );
-		AngleQuaternion( angle2, q2 );
+		AngleQuaternion( angle1, q1, true );
+		AngleQuaternion( angle2, q2, true );
 		QuaternionSlerp( q1, q2, s, q );
 	}
 	else
 	{
-		AngleQuaternion( angle1, q );
+		AngleQuaternion( angle1, q, true );
 	}
 }
 
@@ -2019,10 +2030,10 @@ static void R_StudioDrawPoints_legacy( void )
 			pglColor4ub( clr->r, clr->g, clr->b, 255 );
 			alpha = 1.0f;
 		}
-		else if( g_nFaceFlags & STUDIO_NF_TRANSPARENT && R_StudioOpaque( RI.currententity ))
+		else if( g_nFaceFlags & STUDIO_NF_TRANSPARENT && R_StudioOpaque( g_iRenderMode ))
 		{
 			GL_SetRenderMode( kRenderTransAlpha );
-			pglAlphaFunc( GL_GREATER, 0.0f );
+			pglAlphaFunc( GL_GEQUAL, 0.5f );
 			alpha = 1.0f;
 		}
 		else if( g_nFaceFlags & STUDIO_NF_ADDITIVE )
@@ -2361,10 +2372,10 @@ static void R_StudioDrawMeshes( mstudiotexture_t *ptexture, short *pskinref, flo
 			pglColor4ub( clr->r, clr->g, clr->b, 255 );
 			alpha = 1.0f;
 		}
-		else if( g_nFaceFlags & STUDIO_NF_TRANSPARENT && R_StudioOpaque( RI.currententity ))
+		else if( g_nFaceFlags & STUDIO_NF_TRANSPARENT && R_StudioOpaque( g_iRenderMode ))
 		{
 			GL_SetRenderMode( kRenderTransAlpha );
-			pglAlphaFunc( GL_GREATER, 0.0f );
+			pglAlphaFunc( GL_GEQUAL, 0.5f );
 			alpha = 1.0f;
 		}
 		else if( g_nFaceFlags & STUDIO_NF_ADDITIVE )
@@ -2780,8 +2791,8 @@ static model_t *GAME_EXPORT R_StudioSetupPlayerModel( int index )
 
 	if( cls.key_dest == key_menu && !index )
 	{
-		// we are in menu.
-		info = &menu.playerinfo;
+		// we are in gameui.
+		info = &gameui.playerinfo;
 	}
 	else
 	{
@@ -2909,15 +2920,16 @@ R_StudioSetupRenderer
 */
 static void GAME_EXPORT R_StudioSetupRenderer( int rendermode )
 {
+	if( rendermode > kRenderTransAdd ) rendermode = 0;
 	g_iRenderMode = bound( 0, rendermode, kRenderTransAdd );
-	pglShadeModel( GL_SMOOTH );	// enable gouraud shading
 	if( clgame.ds.cullMode != GL_NONE ) GL_Cull( GL_FRONT );
 
 	// enable depthmask on studiomodels
 	if( glState.drawTrans && g_iRenderMode != kRenderTransAdd )
 		pglDepthMask( GL_TRUE );
 
-	pglAlphaFunc( GL_GREATER, 0.0f );
+	pglAlphaFunc( GL_GEQUAL, 0.5f );
+	pglShadeModel( GL_SMOOTH );
 
 	if( g_iBackFaceCull )
 		GL_FrontFace( true );
@@ -2932,7 +2944,6 @@ R_StudioRestoreRenderer
 static void GAME_EXPORT R_StudioRestoreRenderer( void )
 {
 	pglTexEnvf( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE );
-	pglShadeModel( GL_FLAT );
 
 	// restore depthmask state for sprites etc
 	if( glState.drawTrans && g_iRenderMode != kRenderTransAdd )
@@ -3801,7 +3812,7 @@ static void R_StudioLoadTexture( model_t *mod, studiohdr_t *phdr, mstudiotexture
 		filter = R_FindTexFilter( va( "%s.mdl/%s", mdlname, name )); // grab texture filter
 
 	// NOTE: colormaps must have the palette for properly work. Ignore it.
-	if( Mod_AllowMaterials( ) && !( ptexture->flags & STUDIO_NF_COLORMAP ))
+	if( Mod_AllowMaterials( ) && !FBitSet( ptexture->flags, STUDIO_NF_COLORMAP ))
 	{
 		int	gl_texturenum = 0;
 
@@ -3824,7 +3835,7 @@ static void R_StudioLoadTexture( model_t *mod, studiohdr_t *phdr, mstudiotexture
 		Image_SetMDLPointer((byte *)phdr + ptexture->index);
 		size = sizeof( mstudiotexture_t ) + ptexture->width * ptexture->height + 768;
 
-		if( host.features & ENGINE_DISABLE_HDTEXTURES && ptexture->flags & STUDIO_NF_TRANSPARENT )
+		if( FBitSet( host.features, ENGINE_DISABLE_HDTEXTURES ) && FBitSet( ptexture->flags, STUDIO_NF_TRANSPARENT ))
 			flags |= TF_KEEP_8BIT; // Paranoia2 alpha-tracing
 
 		// build the texname
@@ -3842,7 +3853,6 @@ static void R_StudioLoadTexture( model_t *mod, studiohdr_t *phdr, mstudiotexture
 	{
 		// duplicate texnum for easy acess 
 		if( tx ) tx->gl_texturenum = ptexture->index;
-		GL_SetTextureType( ptexture->index, TEX_STUDIO );
 	}
 }
 

@@ -57,9 +57,6 @@ convar_t	*download_types;
 convar_t	*build, *ver; // original xash3d info
 convar_t	*host_build, *host_ver; // fork info
 convar_t	*host_mapdesign_fatal;
-convar_t 	*cmd_scripting = NULL;
-
-static int num_decals;
 
 // these cvars will be duplicated on each client across network
 int Host_ServerState( void )
@@ -98,23 +95,26 @@ Host_PrintEngineFeatures
 */
 void Host_PrintEngineFeatures( void )
 {
-	if( host.features & ENGINE_WRITE_LARGE_COORD )
-		MsgDev( D_AICONSOLE, "^3EXT:^7 Big world support enabled\n" );
+	if( FBitSet( host.features, ENGINE_WRITE_LARGE_COORD ))
+		MsgDev( D_REPORT, "^3EXT:^7 big world support enabled\n" );
 
-	if( host.features & ENGINE_BUILD_SURFMESHES )
-		MsgDev( D_AICONSOLE, "^3EXT:^7 Surfmeshes enabled\n" );
+	if( FBitSet( host.features, ENGINE_BUILD_SURFMESHES ))
+		MsgDev( D_REPORT, "^3EXT:^7 surfmeshes enabled\n" );
 
-	if( host.features & ENGINE_LOAD_DELUXEDATA )
-		MsgDev( D_AICONSOLE, "^3EXT:^7 Deluxemap support enabled\n" );
+	if( FBitSet( host.features, ENGINE_LOAD_DELUXEDATA ))
+		MsgDev( D_REPORT, "^3EXT:^7 deluxemap support enabled\n" );
 
-	if( host.features & ENGINE_TRANSFORM_TRACE_AABB )
-		MsgDev( D_AICONSOLE, "^3EXT:^7 Transform trace AABB enabled\n" );
+	if( FBitSet( host.features, ENGINE_TRANSFORM_TRACE_AABB ))
+		MsgDev( D_REPORT, "^3EXT:^7 Transform trace AABB enabled\n" );
 
-	if( host.features & ENGINE_LARGE_LIGHTMAPS )
-		MsgDev( D_AICONSOLE, "^3EXT:^7 Large lightmaps enabled\n" );
+	if( FBitSet( host.features, ENGINE_LARGE_LIGHTMAPS ))
+		MsgDev( D_REPORT, "^3EXT:^7 Large lightmaps enabled\n" );
 
-	if( host.features & ENGINE_COMPENSATE_QUAKE_BUG )
-		MsgDev( D_AICONSOLE, "^3EXT:^7 Quake bug compensation enabled\n" );
+	if( FBitSet( host.features, ENGINE_COMPENSATE_QUAKE_BUG ))
+		MsgDev( D_REPORT, "^3EXT:^7 Compensate quake bug enabled\n" );
+
+	if( FBitSet( host.features, ENGINE_FIXED_FRAMERATE ))
+		MsgDev( D_REPORT, "^3EXT:^7 fixed main cycle\n" );
 }
 
 /*
@@ -142,7 +142,7 @@ void Host_EndGame( const char *message, ... )
 	static char	string[MAX_SYSPATH];
 	
 	va_start( argptr, message );
-	Q_vsprintf( string, message, argptr );
+	Q_vsnprintf( string, sizeof( string ), message, argptr );
 	va_end( argptr );
 
 	MsgDev( D_INFO, "Host_EndGame: %s\n", string );
@@ -261,10 +261,10 @@ void Host_Exec_f( void )
 		return;
 	}
 
-	// HACKHACK: don't execute listenserver.cfg in singleplayer
-	if( !Q_stricmp( Cvar_VariableString( "lservercfgfile" ),  Cmd_Argv( 1 )))
+	// don't execute listenserver.cfg in singleplayer
+	if( !Q_stricmp( Cvar_VariableString( "lservercfgfile" ), Cmd_Argv( 1 )))
 	{
-		if( Cvar_VariableValue( "maxplayers" ) == 1.0f )
+		if( Cvar_VariableInteger( "maxplayers" ) == 1.0f )
 			return;
 	}
 
@@ -369,12 +369,12 @@ qboolean Host_IsLocalClient( void )
 Host_RegisterDecal
 =================
 */
-qboolean Host_RegisterDecal( const char *name )
+qboolean Host_RegisterDecal( const char *name, int *count )
 {
 	char	shortname[CS_SIZE];
 	int	i;
 
-	if( !name || !name[0] )
+	if( !name || !*name )
 		return 0;
 
 	FS_FileBase( name, shortname );
@@ -393,7 +393,7 @@ qboolean Host_RegisterDecal( const char *name )
 
 	// register new decal
 	Q_strncpy( (char *)host.draw_decals[i], shortname, sizeof( host.draw_decals[i] ));
-	num_decals++;
+	*count += 1;
 
 	return true;
 }
@@ -406,17 +406,16 @@ Host_InitDecals
 void Host_InitDecals( void )
 {
 	search_t	*t;
-	int	i;
+	int	i, num_decals = 0;
 
 	Q_memset( host.draw_decals, 0, sizeof( host.draw_decals ));
-	num_decals = 0;
 
 	// lookup all decals in decals.wad
 	t = FS_Search( "decals.wad/*.*", true, false );
 
 	for( i = 0; t && i < t->numfilenames; i++ )
 	{
-		if( !Host_RegisterDecal( t->filenames[i] ))
+		if( !Host_RegisterDecal( t->filenames[i], &num_decals ) )
 			break;
 	}
 
@@ -433,27 +432,26 @@ Write ambient sounds into demo
 */
 void Host_RestartAmbientSounds( void )
 {
-	soundlist_t	soundInfo[64];
+	soundlist_t	soundInfo[128];
 	string		curtrack, looptrack;
 	int		i, nSounds;
-	fs_offset_t	position;
+	long	position;
 
-	if( !SV_Active( ))
-	{
-		return;
-	}
+	if( !SV_Active( )) return;
 
-	nSounds = S_GetCurrentStaticSounds( soundInfo, 64 );
+	nSounds = S_GetCurrentStaticSounds( soundInfo, 128 );
 	
 	for( i = 0; i < nSounds; i++ )
 	{
-		if( !soundInfo[i].looping || soundInfo[i].entnum == -1 )
+		soundlist_t *si = soundInfo + i;
+
+		if( !si->looping || si->entnum == -1 )
 			continue;
 
 		MsgDev( D_NOTE, "Restarting sound %s...\n", soundInfo[i].name );
-		S_StopSound( soundInfo[i].entnum, soundInfo[i].channel, soundInfo[i].name );
-		SV_StartSound( pfnPEntityOfEntIndex( soundInfo[i].entnum ), CHAN_STATIC, soundInfo[i].name,
-		soundInfo[i].volume, soundInfo[i].attenuation, 0, soundInfo[i].pitch );
+		S_StopSound( si->entnum, si->channel, si->name );
+		SV_StartSound( pfnPEntityOfEntIndex( si->entnum ), CHAN_STATIC, si->name,
+		si->volume, si->attenuation, 0, si->pitch );
 	}
 
 	// restart soundtrack
@@ -478,10 +476,7 @@ void Host_RestartDecals( void )
 	sizebuf_t		*msg;
 	int		i;
 
-	if( !SV_Active( ))
-	{
-		return;
-	}
+	if( !SV_Active( )) return;
 
 	// g-cont. add space for studiodecals if present
 	host.decalList = (decallist_t *)Z_Malloc( sizeof( decallist_t ) * MAX_RENDER_DECALS * 2 );
@@ -525,12 +520,12 @@ void Host_RestartDecals( void )
 
 /*
 ===================
-Host_GetConsoleCommands
+Host_GetCommands
 
 Add them exactly as if they had been typed at the console
 ===================
 */
-void Host_GetConsoleCommands( void )
+void Host_GetCommands( void )
 {
 	char	*cmd;
 
@@ -539,6 +534,88 @@ void Host_GetConsoleCommands( void )
 		Cbuf_AddText( cmd );
 		Cbuf_Execute();
 	}
+}
+
+/*
+===================
+Host_FrameTime
+
+Returns false if the time is too short to run a frame
+===================
+*/
+qboolean Host_FrameTime( float time )
+{
+	static double	oldtime;
+	double		minframetime;
+	double		fps;
+
+	host.realtime += time;
+
+	// limit fps to withing tolerable range
+	fps = bound( HOST_MINFPS, HOST_FPS, HOST_MAXFPS );
+	minframetime = ( 1.0 / fps );
+
+	if(( host.realtime - oldtime ) < minframetime )
+	{
+		// framerate is too high
+		return false;
+	}
+
+	host.frametime = host.realtime - oldtime;
+	host.realframetime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
+	oldtime = host.realtime;
+
+	if( host_framerate->value > 0 && ( Host_IsLocalGame( )))
+	{
+		float fps = host_framerate->value;
+		if( fps > 1 ) fps = 1.0f / fps;
+		host.frametime = fps;
+	}
+	else
+	{	// don't allow really long or short frames
+		host.frametime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
+	}
+
+	return true;
+}
+
+/*
+===================
+Host_RenderTime
+
+Returns false if the time is too short to render a frame
+===================
+*/
+qboolean Host_RenderTime( float time )
+{
+	static double	oldtime;
+	static double	newtime;
+	double		fps;
+
+	newtime += time;
+
+	// dedicated's tic_rate regulates server frame rate.  Don't apply fps filter here.
+	fps = host_maxfps->value;
+
+	if( fps != 0 )
+	{
+		double	minframetime;
+
+		// limit fps to withing tolerable range
+		fps = bound( MIN_FPS, fps, MAX_FPS );
+
+		minframetime = 1.0 / fps;
+
+		if(( newtime - oldtime ) < minframetime )
+		{
+			// framerate is too high
+			return false;
+		}
+	}
+
+	oldtime = newtime;
+
+	return true;
 }
 
 /*
@@ -558,11 +635,12 @@ qboolean Host_FilterTime( float time )
 	// dedicated's tic_rate regulates server frame rate.  Don't apply fps filter here.
 	fps = host_maxfps->value;
 
+	// clamp the fps in multiplayer games
 	if( fps != 0 )
 	{
 		float	minframetime;
 
-		// limit fps to within tolerable range
+		// limit fps to withing tolerable range
 		fps = bound( MIN_FPS, fps, MAX_FPS );
 
 		minframetime = 1.0f / fps;
@@ -570,7 +648,6 @@ qboolean Host_FilterTime( float time )
 		if(( host.realtime - oldtime ) < minframetime )
 		{
 			// framerate is too high
-			//Sys_Sleep( 2000 * ( minframetime - ( host.realtime - oldtime ) ) );
 			return false;
 		}
 	}
@@ -581,7 +658,7 @@ qboolean Host_FilterTime( float time )
 
 	if( host_framerate->value > 0 && ( Host_IsLocalGame()))
 	{
-		fps = host_framerate->value;
+		float fps = host_framerate->value;
 		if( fps > 1 ) fps = 1.0f / fps;
 		host.frametime = fps;
 	}
@@ -589,7 +666,7 @@ qboolean Host_FilterTime( float time )
 	{	// don't allow really long or short frames
 		host.frametime = bound( MIN_FRAMETIME, host.frametime, MAX_FRAMETIME );
 	}
-	
+
 	return true;
 }
 
@@ -605,8 +682,8 @@ void Host_Autosleep( void )
 	if( Host_IsDedicated() )
 	{
 		// let the dedicated server some sleep
-		Sys_Sleep( sleeptime );
-
+		if( !FBitSet( host.features, ENGINE_FIXED_FRAMERATE ))
+			Sys_Sleep( sleeptime );
 	}
 	else
 	{
@@ -640,25 +717,42 @@ void Host_Frame( float time )
 
 	Host_Autosleep();
 
-	// decide the simulation time
-	if( !Host_FilterTime( time ))
-		return;
+	// new-style game loop
+	if( FBitSet( host.features, ENGINE_FIXED_FRAMERATE ))
+	{
+		// decide the simulation time
+		if( Host_FrameTime( time ))
+		{
+			Host_InputFrame ();	// input frame
+			Host_GetCommands();	// dedicated
+			Host_ServerFrame(); // server frame
+			Host_ClientFrame(); // client frame
+			host.framecount++;
+		}
 
-	rand (); // keep the random time dependent
+		// clamp the renderer time
+		if( !Host_RenderTime( time ))
+			return;
 
-	Sys_SendKeyEvents (); // call WndProc on WIN32
+		Host_RenderFrame (); // render frame
+		HTTP_Run();
+	}
+	else	// classic game loop
+	{
+		Host_InputFrame ();	// input frame
 
-	Host_InputFrame ();	// input frame
+		// decide the simulation time
+		if( !Host_FilterTime( time ))
+			return;
 
-	Host_GetConsoleCommands ();
-
-	Host_ServerFrame (); // server frame
-	if ( !Host_IsDedicated() )
+		Host_GetCommands ();
+		Host_ServerFrame (); // server frame
 		Host_ClientFrame (); // client frame
 
-	HTTP_Run();
+		HTTP_Run();
 
-	host.framecount++;
+		host.framecount++;
+	}
 }
 
 /*
@@ -863,7 +957,7 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 		Q_strncpy( host.rootdir, IOS_GetDocsDir(), sizeof(host.rootdir) );
 		#elif defined(XASH_SDL)
 		if( !( baseDir = SDL_GetBasePath() ) )
-			Sys_Error( "couldn't determine current directory: %s", SDL_GetError() );
+			Sys_Error( "couldn't determine current directory: %s\n", SDL_GetError() );
 		Q_strncpy( host.rootdir, baseDir, sizeof( host.rootdir ) );
 		SDL_free( baseDir );
 		#else
@@ -887,7 +981,8 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 
 	host.mempool = Mem_AllocPool( "Zone Engine" );
 
-	if( Sys_CheckParm( "-console" )) host.developer = 1;
+	if( Sys_CheckParm( "-console" ))
+		host.developer = 1;
 	if( Sys_CheckParm( "-dev" ))
 	{
 		if( Sys_GetParmFromCmdLine( "-dev", dev_level ))
@@ -967,7 +1062,6 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 	Cmd_AddCommand( "exec", Host_Exec_f, "execute a script file" );
 	Cmd_AddCommand( "memlist", Host_MemStats_f, "prints memory pool information" );
 	Cmd_AddCommand( "userconfigd", Host_Userconfigd_f, "execute all scripts from userconfig.d" );
-	cmd_scripting = Cvar_Get( "cmd_scripting", "0", CVAR_ARCHIVE, "enable simple condition checking and variable operations" );
 	
 	FS_Init();
 	Image_Init();
@@ -1131,7 +1225,7 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 
 	// we need to execute it again here
 	if( !Host_IsDedicated() )
-		Cmd_ExecuteString( "exec config.cfg\n", src_command );
+		Cmd_ExecuteString( "exec config.cfg\n" );
 
 	Cbuf_Execute();
 
@@ -1141,7 +1235,7 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 	// in case of empty init.rc
 	if( !host.stuffcmdsrun ) Cbuf_AddText( "stuffcmds\n" );
 
-	oldtime = Sys_DoubleTime();
+	oldtime = Sys_DoubleTime() - 0.1f;
 	IN_TouchInitConfig();
 	SCR_CheckStartupVids();	// must be last
 #ifdef XASH_SDL

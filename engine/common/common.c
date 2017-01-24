@@ -23,6 +23,39 @@ GNU General Public License for more details.
 
 /*
 ==============
+COM_IsSingleChar
+
+interpert this character as single
+==============
+*/
+static int COM_IsSingleChar( char c )
+{
+	if( c == '{' || c == '}' || c == ')' || c == '(' || c == '\'' || c == ',' )
+		return true;
+
+	if( host.com_handlecolon && c == ':' )
+		return true;
+
+	return false;
+}
+
+/*
+==============
+COM_IsWhiteSpace
+
+interpret symbol as whitespace
+==============
+*/
+
+static int COM_IsWhiteSpace( char space )
+{
+	if( space == ' ' || space == '\t' || space == '\r' || space == '\n' )
+		return 1;
+	return 0;
+}
+
+/*
+==============
 COM_ParseFile
 
 text parser
@@ -90,7 +123,7 @@ skipwhite:
 	}
 
 	// parse single characters
-	if( c == '{' || c == '}' || c == ')' || c == '(' || c == '\'' || c == ',' )
+	if( COM_IsSingleChar( c ) )
 	{
 		token[len] = c;
 		len++;
@@ -106,13 +139,63 @@ skipwhite:
 		len++;
 		c = ((byte)*data);
 
-		if( c == '{' || c == '}' || c == ')' || c == '(' || c == '\'' || c == ',' )
+		if( COM_IsSingleChar( c ) )
 			break;
 	} while( c > 32 );
 
 	token[len] = 0;
 
 	return data;
+}
+
+/*
+================
+COM_ParseVector
+
+================
+*/
+qboolean COM_ParseVector( char **pfile, float *v, size_t size )
+{
+	string	token;
+	qboolean	bracket = false;
+	char	*saved;
+	uint	i;
+
+	if( v == NULL || size == 0 )
+		return false;
+
+	Q_memset( v, 0, sizeof( *v ) * size );
+
+	if( size == 1 )
+	{
+		*pfile = COM_ParseFile( *pfile, token );
+		v[0] = Q_atof( token );
+		return true;
+	}
+
+	saved = *pfile;
+
+	if(( *pfile = COM_ParseFile( *pfile, token )) == NULL )
+		return false;
+
+	if( token[0] == '(' )
+		bracket = true;
+	else *pfile = saved; // restore token to right get it again
+
+	for( i = 0; i < size; i++ )
+	{
+		*pfile = COM_ParseFile( *pfile, token );
+		v[i] = Q_atof( token );
+	}
+
+	if( !bracket ) return true;	// done
+
+	if(( *pfile = COM_ParseFile( *pfile, token )) == NULL )
+		return false;
+
+	if( token[0] == ')' )
+		return true;
+	return false;
 }
 
 /*
@@ -177,6 +260,39 @@ int GAME_EXPORT COM_ExpandFilename( const char *fileName, char *nameOutBuffer, i
 		return 1;
 	}
 	return 0;
+}
+
+/*
+=============
+COM_TrimSpace
+
+trims all whitespace from the front
+and end of a string
+=============
+*/
+void COM_TrimSpace( const char *source, char *dest )
+{
+	int	start, end, length;
+
+	start = 0;
+	end = Q_strlen( source );
+
+	while( source[start] && COM_IsWhiteSpace( source[start] ))
+		start++;
+	end--;
+
+	while( end > 0 && COM_IsWhiteSpace( source[end] ))
+		end--;
+	end++;
+
+	length = end - start;
+
+	if( length > 0 )
+		Q_memcpy( dest, source + start, length );
+	else length = 0;
+
+	// terminate the dest string
+	dest[length] = 0;
 }
 
 /*
@@ -295,8 +411,12 @@ byte* GAME_EXPORT COM_LoadFileForMe( const char *filename, int *pLength )
 	if( pfile )
 	{
 		file = malloc( iLength + 1 );
-		Q_memcpy( file, pfile, iLength );
-		file[iLength] = '\0';
+
+		if( file != NULL )
+		{
+			Q_memcpy( file, pfile, iLength );
+			file[iLength] = '\0';
+		}
 		Mem_Free( pfile );
 		pfile = file;
 	}
@@ -312,34 +432,26 @@ COM_LoadFile
 */
 byte *GAME_EXPORT COM_LoadFile( const char *filename, int usehunk, int *pLength )
 {
-	string	name;
-	byte	*file, *pfile;
-	fs_offset_t	iLength;
+	return COM_LoadFileForMe( filename, pLength );
+}
 
-	ASSERT( usehunk == 5 );
+/*
+=============
+COM_LoadFile
 
+=============
+*/
+int COM_SaveFile( const char *filename, const void *data, long len )
+{
+	// check for empty filename
 	if( !filename || !*filename )
-	{
-		if( pLength ) *pLength = 0;
-		return NULL;
-	}
+		return false;
 
-	Q_strncpy( name, filename, sizeof( name ));
-	COM_FixSlashes( name );
+	// check for null data
+	if( !data || len <= 0 )
+		return false;
 
-	pfile = FS_LoadFile( name, &iLength, false );
-	if( pLength ) *pLength = iLength;
-
-	if( pfile )
-	{
-		file = malloc( iLength + 1 );
-		Q_memcpy( file, pfile, iLength );
-		file[iLength] = '\0';
-		Mem_Free( pfile );
-		pfile = file;
-	}
-
-	return pfile;
+	return FS_WriteFile( filename, data, len );
 }
 
 /*
@@ -351,6 +463,25 @@ COM_FreeFile
 void GAME_EXPORT COM_FreeFile( void *buffer )
 {
 	free( buffer ); 
+}
+
+/*
+=============
+COM_NormalizeAngles
+
+=============
+*/
+void COM_NormalizeAngles( vec3_t angles )
+{
+	int i;
+
+	for( i = 0; i < 3; i++ )
+	{
+		if( angles[i] > 180.0f )
+			angles[i] -= 360.0f;
+		else if( angles[i] < -180.0f )
+			angles[i] += 360.0f;
+	}
 }
 
 /*
@@ -392,9 +523,24 @@ pfnCvar_RegisterVariable
 
 =============
 */
-cvar_t *GAME_EXPORT pfnCvar_RegisterVariable( const char *szName, const char *szValue, int flags )
+cvar_t * GAME_EXPORT pfnCvar_RegisterClientVariable( const char *szName, const char *szValue, int flags )
 {
+	if( FBitSet( flags, FCVAR_GLCONFIG ))
+		return (cvar_t *)Cvar_Get( szName, szValue, flags, va( "enable or disable %s", szName ));
 	return (cvar_t *)Cvar_Get( szName, szValue, flags|CVAR_CLIENTDLL, "client cvar" );
+}
+
+/*
+=============
+pfnCvar_RegisterVariable
+
+=============
+*/
+cvar_t * GAME_EXPORT pfnCvar_RegisterGameUIVariable( const char *szName, const char *szValue, int flags )
+{
+	if( FBitSet( flags, FCVAR_GLCONFIG ))
+		return (cvar_t *)Cvar_Get( szName, szValue, flags, va( "enable or disable %s", szName ));
+	return (cvar_t *)Cvar_Get( szName, szValue, flags|CVAR_GAMEUIDLL, "GameUI cvar" );
 }
 
 /*
@@ -404,30 +550,9 @@ pfnCVarGetPointer
 can return NULL
 =============
 */
-cvar_t *GAME_EXPORT pfnCVarGetPointer( const char *szVarName )
+cvar_t * GAME_EXPORT pfnCVarGetPointer( const char *szVarName )
 {
-	cvar_t	*cvPtr;
-
-	cvPtr = (cvar_t *)Cvar_FindVar( szVarName );
-
-	return cvPtr;
-}
-
-/*
-=============
-pfnAddClientCommand
-
-=============
-*/
-int GAME_EXPORT pfnAddClientCommand( const char *cmd_name, xcommand_t func )
-{
-	if( !cmd_name || !*cmd_name )
-		return 0;
-
-	// NOTE: if( func == NULL ) cmd will be forwarded to a server
-	Cmd_AddClientCommand( cmd_name, func );
-
-	return 1;
+	return (cvar_t *)Cvar_FindVar( szVarName );
 }
 
 /*

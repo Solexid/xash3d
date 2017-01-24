@@ -107,9 +107,11 @@ static int Host_MapKey( int key )
 		case 0x0D: return K_KP_ENTER;
 		case 0x2F: return K_KP_SLASH;
 		case 0xAF: return K_KP_PLUS;
+		default: return result;
 		}
-		return result;
 	}
+
+	return result; // shut up compiler
 }
 
 /*
@@ -399,7 +401,7 @@ void IN_DeactivateMouse( void )
 
 /*
 ================
-IN_Mouse
+IN_MouseMove
 ================
 */
 void IN_MouseMove( void )
@@ -479,12 +481,12 @@ void IN_MouseEvent( int mstate )
 	// perform button actions
 	for( i = 0; i < in_mouse_buttons; i++ )
 	{
-		if(( mstate & ( 1U << i )) && !( in_mouse_oldbuttonstate & ( 1U << i )))
+		if( FBitSet( mstate, BIT( i )) && !FBitSet( in_mouse_oldbuttonstate, BIT( i )))
 		{
 			Key_Event( K_MOUSE1 + i, true );
 		}
 
-		if(!( mstate & ( 1U << i )) && ( in_mouse_oldbuttonstate & ( 1U << i )))
+		if( !FBitSet( mstate, BIT( i )) && FBitSet( in_mouse_oldbuttonstate, BIT( i )))
 		{
 			Key_Event( K_MOUSE1 + i, false );
 		}
@@ -562,58 +564,58 @@ void IN_JoyAppendMove( usercmd_t *cmd, float forwardmove, float sidemove )
 		moveflags &= ~T;
 	else if( !( moveflags & T ) )
 	{
-		Cmd_ExecuteString("-back", src_command );
-		Cmd_ExecuteString("-forward", src_command );
+		Cmd_ExecuteString("-back" );
+		Cmd_ExecuteString("-forward" );
 		moveflags |= T;
 	}
 	if( sidemove )
 		moveflags &= ~S;
 	else if( !( moveflags & S ) )
 	{
-		Cmd_ExecuteString("-moveleft", src_command );
-		Cmd_ExecuteString("-moveright", src_command );
+		Cmd_ExecuteString("-moveleft" );
+		Cmd_ExecuteString("-moveright" );
 		moveflags |= S;
 	}
 
 	if ( forwardmove > 0.7 && !( moveflags & F ))
 	{
 		moveflags |= F;
-		Cmd_ExecuteString( "+forward", src_command );
+		Cmd_ExecuteString( "+forward" );
 	}
 	else if ( forwardmove < 0.7 && ( moveflags & F ))
 	{
 		moveflags &= ~F;
-		Cmd_ExecuteString( "-forward", src_command );
+		Cmd_ExecuteString( "-forward" );
 	}
 	if ( forwardmove < -0.7 && !( moveflags & B ))
 	{
 		moveflags |= B;
-		Cmd_ExecuteString( "+back", src_command );
+		Cmd_ExecuteString( "+back" );
 	}
 	else if ( forwardmove > -0.7 && ( moveflags & B ))
 	{
 		moveflags &= ~B;
-		Cmd_ExecuteString( "-back", src_command );
+		Cmd_ExecuteString( "-back" );
 	}
 	if ( sidemove > 0.9 && !( moveflags & R ))
 	{
 		moveflags |= R;
-		Cmd_ExecuteString( "+moveright", src_command );
+		Cmd_ExecuteString( "+moveright" );
 	}
 	else if ( sidemove < 0.9 && ( moveflags & R ))
 	{
 		moveflags &= ~R;
-		Cmd_ExecuteString( "-moveright", src_command );
+		Cmd_ExecuteString( "-moveright" );
 	}
 	if ( sidemove < -0.9 && !( moveflags & L ))
 	{
 		moveflags |= L;
-		Cmd_ExecuteString( "+moveleft", src_command );
+		Cmd_ExecuteString( "+moveleft" );
 	}
 	else if ( sidemove > -0.9 && ( moveflags & L ))
 	{
 		moveflags &= ~L;
-		Cmd_ExecuteString( "-moveleft", src_command );
+		Cmd_ExecuteString( "-moveleft" );
 	}
 }
 
@@ -685,9 +687,6 @@ void Host_InputFrame( void )
 		clgame.dllFuncs.pfnMoveEvent( forward, side );
 	}
 	Cbuf_Execute ();
-
-	if( host.state == HOST_RESTART )
-		host.state = HOST_FRAME; // restart is finished
 
 	if( !in_mouseinitialized )
 		return;

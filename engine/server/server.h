@@ -37,7 +37,7 @@ extern int SV_UPDATE_BACKUP;
 // hostflags
 #define SVF_SKIPLOCALHOST	BIT( 0 )
 #define SVF_PLAYERSONLY	BIT( 1 )
-#define SVF_PORTALPASS	BIT( 2 )			// we are do portal pass
+#define SVF_MERGE_VISIBILITY	BIT( 2 )			// we are do portal pass
 
 // mapvalid flags
 #define MAP_IS_EXIST	BIT( 0 )
@@ -53,10 +53,17 @@ extern int SV_UPDATE_BACKUP;
 #define MAKE_STRING(str)	SV_MakeString( str )
 
 #define MAX_PUSHED_ENTS	256
-#define MAX_CAMERAS		32
+#define MAX_VIEWENTS	128
 
-#define DVIS_PVS		0
-#define DVIS_PHS		1
+#define FCL_RESEND_USERINFO	BIT( 0 )
+#define FCL_RESEND_MOVEVARS	BIT( 1 )
+#define FCL_SKIP_NET_MESSAGE	BIT( 2 )
+#define FCL_SEND_NET_MESSAGE	BIT( 3 )
+#define FCL_PREDICT_MOVEMENT	BIT( 4 )	// movement prediction is enabled
+#define FCL_LOCAL_WEAPONS	BIT( 5 )	// weapon prediction is enabled
+#define FCL_LAG_COMPENSATION	BIT( 6 )	// lag compensation is enabled
+#define FCL_FAKECLIENT	BIT( 7 )	// this client is a fake player controlled by the game DLL
+#define FCL_HLTV_PROXY	BIT( 8 )	// this is a proxy for a HLTV client (spectator)
 
 typedef enum
 {
@@ -122,7 +129,9 @@ typedef struct server_s
 	int		viewentity;	// applied on client restore. this is temporare place
 					// until client connected
 
-	double		time;		// sv.time += host.frametime
+	double		time;		// sv.time += sv.frametime
+	double		time_residual;	// unclamped
+	float		frametime;	// 1.0 / sv_fps->value
 	int		net_framenum;	// to avoid send edicts twice through portals
 
 	int		hostflags;	// misc server flags: predicting etc
@@ -151,10 +160,6 @@ typedef struct server_s
 
 	sv_baselines_t	instanced;	// instanced baselines
 
-	// unreliable data to send to clients.
-	sizebuf_t		datagram;
-	byte		datagram_buf[NET_MAX_PAYLOAD];
-
 	// reliable data to send to clients.
 	sizebuf_t		reliable_datagram;	// copied to all clients at end of frame
 	byte		reliable_datagram_buf[NET_MAX_PAYLOAD];
@@ -173,6 +178,7 @@ typedef struct server_s
 	uint		checksum;		// for catching cheater maps
 
 	qboolean		write_bad_message;	// just for debug
+	qboolean		simulating;		// physics is running
 	qboolean		paused;
 } server_t;
 
@@ -183,7 +189,7 @@ typedef struct
 	float		latency;
 
 	clientdata_t	clientdata;
-	weapon_data_t	weapondata[64];
+	weapon_data_t	weapondata[MAX_LOCAL_WEAPONS];
 
 	int  		num_entities;
 	int  		first_entity;		// into the circular sv_packet_entities[]
@@ -193,16 +199,11 @@ typedef struct sv_client_s
 {
 	cl_state_t	state;
 	char		name[32];			// extracted from userinfo, color string allowed
+	int			flags;
 
 	char		userinfo[MAX_INFO_STRING];	// name, etc (received from client)
 	char		physinfo[MAX_INFO_STRING];	// set on server (transmit to client)
 
-	qboolean		send_message;
-	qboolean		skip_message;
-
-	qboolean		local_weapons;		// enable weapon predicting
-	qboolean		lag_compensation;		// enable lag compensation
-	qboolean		hltv_proxy;		// this is spectator proxy (hltv)
 	qboolean		hasusrmsgs;
 
 	netchan_t		netchan;
@@ -210,18 +211,13 @@ typedef struct sv_client_s
 	int		delta_sequence;		// -1 = no compression.
 
 	double		next_messagetime;		// time when we should send next world state update  
-	double		cl_updaterate;		// default time to wait for next message
 	double		next_checkpingtime;		// time to send all players pings to client
+	double		cl_updaterate;		// default time to wait for next message
 	double		timebase;			// client timebase
 
 	customization_t	customization;		// player customization linked list
 	resource_t	resource1;
 	resource_t	resource2;		// <mapname.res> from client (server downloading)
-
-	qboolean		sendmovevars;
-	qboolean		sendinfo;
-
-	qboolean		fakeclient;		// This client is a fake player controlled by the game DLL
 
 	usercmd_t		lastcmd;			// for filling in big drops
 
@@ -240,8 +236,8 @@ typedef struct sv_client_s
 	edict_t		*pViewEntity;		// svc_setview member
 	int		messagelevel;		// for filtering printed messages
 
-	edict_t		*cameras[MAX_CAMERAS];	// list of portal cameras in player PVS
-	int		num_cameras;		// num of portal cameras that can merge PVS
+	edict_t		*viewentity[MAX_VIEWENTS];	// list of portal cameras in player PVS
+	int		num_viewents;		// num of portal cameras that can merge PVS
 
 	// the datagram is written to by sound calls, prints, temp ents, etc.
 	// it can be harmlessly overflowed.
@@ -281,10 +277,10 @@ typedef struct sv_client_s
 
 typedef struct
 {
-	netadr_t		adr;
-	int		challenge;
+	netadr_t	adr;
 	double		time;
-	qboolean		connected;
+	int			challenge;
+	qboolean	connected;
 } challenge_t;
 
 typedef struct
@@ -478,9 +474,12 @@ void SV_ExecuteUserCommand (char *s);
 void SV_InitOperatorCommands( void );
 void SV_KillOperatorCommands( void );
 void SV_UserinfoChanged( sv_client_t *cl, const char *userinfo );
+void SV_RemoteCommand( netadr_t from, sizebuf_t *msg );
 void SV_PrepWorldFrame( void );
 void SV_ProcessFile( sv_client_t *cl, char *filename );
 void SV_SendResourceList_f( sv_client_t *cl );
+void SV_AddToMaster( netadr_t from, sizebuf_t *msg );
+qboolean SV_IsSimulating( void );
 void Master_Add( void );
 void Master_Heartbeat( void );
 void Master_Packet( void );
@@ -525,7 +524,7 @@ void SV_WaterMove( edict_t *ent );
 //
 void SV_SendClientMessages( void );
 void SV_ClientPrintf( sv_client_t *cl, int level, char *fmt, ... );
-void SV_BroadcastPrintf( int level, char *fmt, ... );
+void SV_BroadcastPrintf(sv_client_t *ignore, int level, char *fmt, ... );
 void SV_BroadcastCommand( char *fmt, ... );
 
 //
@@ -536,7 +535,6 @@ void SV_RefreshUserinfo( void );
 void SV_GetChallenge( netadr_t from );
 void SV_DirectConnect( netadr_t from );
 void SV_TogglePause( const char *msg );
-void SV_PutClientInServer( edict_t *ent );
 qboolean SV_ShouldUpdatePing( sv_client_t *cl );
 const char *SV_GetClientIDString( sv_client_t *cl );
 void SV_FullClientUpdate( sv_client_t *cl, sizebuf_t *msg );
@@ -590,12 +588,14 @@ void SV_FreeEdict( edict_t *pEdict );
 void SV_InitEdict( edict_t *pEdict );
 const char *SV_ClassName( const edict_t *e );
 void SV_SetModel( edict_t *ent, const char *name );
+void SV_FreePrivateData( edict_t *pEdict );
 void SV_CopyTraceToGlobal( trace_t *trace );
 void SV_SetMinMaxSize( edict_t *e, const float *min, const float *max );
 edict_t* SV_FindEntityByString( edict_t *pStartEdict, const char *pszField, const char *pszValue );
 void SV_PlaybackEventFull( int flags, const edict_t *pInvoker, word eventindex, float delay, float *origin,
-	float *angles, float fparam1, float fparam2, int iparam1, int iparam2, int bparam1, int bparam2 );
+    float *angles, float fparam1, float fparam2, int iparam1, int iparam2, int bparam1, int bparam2 );
 void SV_PlaybackReliableEvent( sizebuf_t *msg, word eventindex, float delay, event_args_t *args );
+qboolean SV_BoxInPVS( const vec3_t org, const vec3_t absmin, const vec3_t absmax );
 void SV_BaselineForEntity( edict_t *pEdict );
 void SV_WriteEntityPatch( const char *filename );
 char *SV_ReadEntityScript( const char *filename, int *flags );
@@ -609,10 +609,10 @@ sv_client_t *SV_ClientFromEdict( const edict_t *pEdict, qboolean spawned_only );
 void SV_SetClientMaxspeed( sv_client_t *cl, float fNewMaxspeed );
 int SV_MapIsValid( const char *filename, const char *spawn_entity, const char *landmark_name );
 void SV_StartSound( edict_t *ent, int chan, const char *sample, float vol, float attn, int flags, int pitch );
-void SV_StartSoundEx( edict_t *ent, int chan, const char *sample, float vol, float attn, int flags, int pitch, qboolean excludeSource );
 void SV_CreateStaticEntity( struct sizebuf_s *msg, sv_static_entity_t *ent );
 edict_t* pfnPEntityOfEntIndex( int iEntIndex );
 int pfnIndexOfEdict( const edict_t *pEdict );
+void pfnWriteBytes( const byte *bytes, int count );
 void SV_UpdateBaseVelocity( edict_t *ent );
 byte *pfnSetFatPVS( const float *org );
 byte *pfnSetFatPAS( const float *org );
@@ -626,7 +626,7 @@ _inline edict_t *SV_EDICT_NUM( int n, const char * file, const int line )
 	if((n >= 0) && (n < svgame.globals->maxEntities))
 		return svgame.edicts + n;
 	Host_Error( "SV_EDICT_NUM: bad number %i (called at %s:%i)\n", n, file, line );
-	return NULL;	
+	return NULL;
 }
 
 //
@@ -652,7 +652,6 @@ void SV_GetTrueMinMax( sv_client_t *cl, int edictnum, vec3_t mins, vec3_t maxs )
 //
 void SV_ClearWorld( void );
 void SV_UnlinkEdict( edict_t *ent );
-qboolean SV_HeadnodeVisible( mnode_t *node, byte *visbits, int *lastleaf );
 void SV_ClipMoveToEntity( edict_t *ent, const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end, trace_t *trace );
 void SV_CustomClipMoveToEntity( edict_t *ent, const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end, trace_t *trace );
 trace_t SV_TraceHull( edict_t *ent, int hullNum, const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end );

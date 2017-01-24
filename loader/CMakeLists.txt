@@ -34,9 +34,9 @@ else()
 endif()
 
 IF (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD" OR CMAKE_SYSTEM_NAME STREQUAL "NetBSD" OR CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
-       target_link_libraries (${LOADER_LIBRARY} -lm -pthread -lexecinfo)
+       target_link_libraries (${LOADER_LIBRARY} -lm -pthread -lexecinfo )
 ELSE ()
-	   target_link_libraries (${LOADER_LIBRARY} -lm -pthread)
+       target_link_libraries (${LOADER_LIBRARY} -lm -pthread )
 ENDIF ()
 
 set_target_properties (${LOADER_SHARED} PROPERTIES

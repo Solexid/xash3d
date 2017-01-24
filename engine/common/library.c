@@ -315,7 +315,7 @@ const char *Com_NameForFunction( void *hInstance, void *function )
 		DWORD image;
 		char buffer[sizeof( IMAGEHLP_SYMBOL64) + MAX_SYM_NAME * sizeof(TCHAR)];
 		PIMAGEHLP_SYMBOL64 symbol = ( PIMAGEHLP_SYMBOL64)buffer;
-		memset( symbol, 0, sizeof(IMAGEHLP_SYMBOL64) + MAX_SYM_NAME );
+		Q_memset( symbol, 0, sizeof(IMAGEHLP_SYMBOL64) + MAX_SYM_NAME );
 		symbol->SizeOfStruct = sizeof( IMAGEHLP_SYMBOL64);
 		symbol->MaxNameLength = MAX_SYM_NAME;
 		DWORD displacement = 0;

@@ -38,7 +38,7 @@ GNU General Public License for more details.
 // NETWORKING INFO
 
 // This is the packet payload without any header bytes (which are attached for actual sending)
-#define NET_MAX_PAYLOAD		80000
+#define NET_MAX_PAYLOAD		96000
 
 // This is the payload plus any header info (excluding UDP header)
 
@@ -64,6 +64,7 @@ GNU General Public License for more details.
 #define PORT_SERVER			27015
 #define MULTIPLAYER_BACKUP		128	// how many data slots to use when in multiplayer (must be power of 2)
 #define SINGLEPLAYER_BACKUP		16	// same for single player  
+#define NUM_PACKET_ENTITIES		128
 
 /*
 ==============================================================

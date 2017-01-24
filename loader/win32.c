@@ -6576,7 +6576,7 @@ no_dll_byname:
     return add_stub();
 }
 
-void *GL_GetProcAddress( const char *name ); // defined by Xash's video backend
+void *GL_GetProcAddress( const char *name );
 static void *WINAPI expwglGetProcAddress(const char *name)
 {
     int i;

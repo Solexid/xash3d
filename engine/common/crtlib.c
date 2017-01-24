@@ -54,6 +54,29 @@ qboolean Q_isdigit( const char *str )
 	return false;
 }
 
+int Q_colorstr( const char *string )
+{
+	int		len;
+	const char	*p;
+
+	if( !string ) return 0;
+
+	len = 0;
+	p = string;
+	while( *p )
+	{
+		if( IsColorString( p ))
+		{
+			len += 2;
+			p += 2;
+			continue;
+		}
+		p++;
+	}
+
+	return len;
+}
+
 #ifndef XASH_SKIPCRTLIB
 
 char Q_toupper( const char in )
@@ -410,6 +433,27 @@ int Q_sprintf( char *buffer, const char *format, ... )
 	return result;
 }
 #endif
+
+uint Q_hashkey( const char *string, uint hashSize, qboolean caseinsensitive )
+{
+	uint	i, hashKey = 0;
+
+	if( caseinsensitive )
+	{
+		for( i = 0; string[i]; i++)
+			hashKey += (i * 119) * Q_tolower( string[i] );
+	}
+	else
+	{
+		for( i = 0; string[i]; i++ )
+			hashKey += (i + 119) * (int)string[i];
+	}
+
+	hashKey = ((hashKey ^ (hashKey >> 10)) ^ (hashKey >> 20)) & (hashSize - 1);
+
+	return hashKey;
+}
+
 char *Q_pretifymem( float value, int digitsafterdecimal )
 {
 	static char	output[8][32];

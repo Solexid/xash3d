@@ -149,7 +149,7 @@ qboolean SV_CopyEdictToPhysEnt( physent_t *pe, edict_t *ed )
 
 void SV_GetTrueOrigin( sv_client_t *cl, int edictnum, vec3_t origin )
 {
-	if( !cl->local_weapons || !cl->lag_compensation )
+	if( !FBitSet( cl->flags, FCL_LOCAL_WEAPONS ) || !FBitSet( cl->flags, FCL_LAG_COMPENSATION ) )
 		return;
 
 	if( !sv_unlag->integer )
@@ -170,7 +170,7 @@ void SV_GetTrueOrigin( sv_client_t *cl, int edictnum, vec3_t origin )
 
 void SV_GetTrueMinMax( sv_client_t *cl, int edictnum, vec3_t mins, vec3_t maxs )
 {
-	if( !cl->local_weapons || !cl->lag_compensation )
+	if( !FBitSet( cl->flags, FCL_LOCAL_WEAPONS ) || !FBitSet( cl->flags, FCL_LAG_COMPENSATION ) )
 		return;
 
 	if( !sv_unlag->integer )
@@ -238,14 +238,14 @@ void SV_AddLinksToPmove( areanode_t *node, const vec3_t pmove_mins, const vec3_t
 			continue;
 
 		// ignore monsterclip brushes
-		if(( check->v.flags & FL_MONSTERCLIP ) && check->v.solid == SOLID_BSP )
+		if(FBitSet( check->v.flags, FL_MONSTERCLIP ) && check->v.solid == SOLID_BSP )
 			continue;
 
 		if( check == pl ) continue;	// himself
 
 		if( !sv_corpse_solid->integer )
 		{
-			if((( check->v.flags & FL_CLIENT ) && check->v.health <= 0 ) || check->v.deadflag == DEAD_DEAD )
+			if((FBitSet( check->v.flags, FL_CLIENT|FL_FAKECLIENT )  && check->v.health <= 0 ) || check->v.deadflag == DEAD_DEAD )
 				continue;	// dead body
 		}
 
@@ -255,7 +255,7 @@ void SV_AddLinksToPmove( areanode_t *node, const vec3_t pmove_mins, const vec3_t
 		VectorCopy( check->v.absmin, mins );
 		VectorCopy( check->v.absmax, maxs );
 
-		if( check->v.flags & FL_CLIENT )
+		if( FBitSet( check->v.flags, FL_CLIENT ))
 		{
 			// trying to get interpolated values
 			if( svs.currentPlayer )
@@ -337,15 +337,15 @@ static void pfnParticle( float *origin, int color, float life, int zpos, int zve
 		return;
 	}
 
-	BF_WriteByte( &sv.reliable_datagram, svc_particle );
-	BF_WriteVec3Coord( &sv.reliable_datagram, origin );
-	BF_WriteChar( &sv.reliable_datagram, 0 ); // no x-vel
-	BF_WriteChar( &sv.reliable_datagram, 0 ); // no y-vel
+	MSG_WriteByte( &sv.reliable_datagram, svc_particle );
+	MSG_WriteVec3Coord( &sv.reliable_datagram, origin );
+	MSG_WriteChar( &sv.reliable_datagram, 0 ); // no x-vel
+	MSG_WriteChar( &sv.reliable_datagram, 0 ); // no y-vel
 	v = bound( -128, (zpos * zvel) * 16.0f, 127 );
-	BF_WriteChar( &sv.reliable_datagram, v ); // write z-vel
-	BF_WriteByte( &sv.reliable_datagram, 1 );
-	BF_WriteByte( &sv.reliable_datagram, color );
-	BF_WriteByte( &sv.reliable_datagram, bound( 0, life * 8, 255 ));
+	MSG_WriteChar( &sv.reliable_datagram, v ); // write z-vel
+	MSG_WriteByte( &sv.reliable_datagram, 1 );
+	MSG_WriteByte( &sv.reliable_datagram, color );
+	MSG_WriteByte( &sv.reliable_datagram, bound( 0, life * 8, 255 ));
 }
 
 static int GAME_EXPORT pfnTestPlayerPosition( float *pos, pmtrace_t *ptrace )
@@ -510,7 +510,7 @@ static void GAME_EXPORT pfnPlaySound( int channel, const char *sample, float vol
 	if( !SV_IsValidEdict( ent )) return;
 
 	// exclude current player, because he played this sound locally during prediction
-	SV_StartSoundEx( ent, channel, sample, volume, attenuation, fFlags, pitch, true );
+	SV_StartSound( ent, channel, sample, volume, attenuation, fFlags|SND_FILTER_CLIENT, pitch );
 }
 
 static void GAME_EXPORT pfnPlaybackEventFull( int flags, int clientindex, word eventindex, float delay, float *origin,
@@ -673,14 +673,14 @@ static void PM_CheckMovingGround( edict_t *ent, float frametime )
 		SV_UpdateBaseVelocity( ent );
 	}
 
-	if( !( ent->v.flags & FL_BASEVELOCITY ))
+	if( !FBitSet( ent->v.flags, FL_BASEVELOCITY ))
 	{
 		// apply momentum (add in half of the previous frame of velocity first)
 		VectorMA( ent->v.velocity, 1.0f + (frametime * 0.5f), ent->v.basevelocity, ent->v.velocity );
 		VectorClear( ent->v.basevelocity );
 	}
 
-	ent->v.flags &= ~FL_BASEVELOCITY;
+	ClearBits( ent->v.flags, FL_BASEVELOCITY );
 }
 
 static void SV_SetupPMove( playermove_t *pmove, sv_client_t *cl, usercmd_t *ucmd, const char *physinfo )
@@ -880,7 +880,7 @@ void SV_SetupMoveInterpolant( sv_client_t *cl )
 		return;
 
 	// unlag disabled for current client
-	if( !cl->local_weapons || !cl->lag_compensation )
+	if( !FBitSet( cl->flags, FCL_LOCAL_WEAPONS ) || !FBitSet( cl->flags, FCL_LAG_COMPENSATION ) )
 		return;
 
 	has_update = true;
@@ -1037,7 +1037,7 @@ void SV_RestoreMoveInterpolant( sv_client_t *cl )
 		return;
 
 	// unlag disabled for current client
-	if( !cl->local_weapons || !cl->lag_compensation )
+	if( !FBitSet( cl->flags, FCL_LOCAL_WEAPONS ) || !FBitSet( cl->flags, FCL_LAG_COMPENSATION ) )
 		return;
 
 	for( i = 0, check = svs.clients; i < sv_maxclients->integer; i++, check++ )
@@ -1101,7 +1101,7 @@ void SV_RunCmd( sv_client_t *cl, usercmd_t *ucmd, int random_seed )
 		return;
 	}
 
-	if( !cl->fakeclient )
+	if( !FBitSet( cl->flags, FCL_FAKECLIENT ) )
 	{
 		SV_SetupMoveInterpolant( cl );
 	}
@@ -1148,27 +1148,35 @@ void SV_RunCmd( sv_client_t *cl, usercmd_t *ucmd, int random_seed )
 	SV_FinishPMove( svgame.pmove, cl );
 			
 	// link into place and touch triggers
-	SV_LinkEdict( clent, true );
-	VectorCopy( clent->v.velocity, oldvel ); // save velocity
-
-	// touch other objects
-	for( i = 0; i < svgame.pmove->numtouch; i++ )
+	if( svgame.physFuncs.PM_PlayerTouch != NULL )
 	{
-		// never touch the objects when "playersonly" is active
-		if( i == MAX_PHYSENTS || ( sv.hostflags & SVF_PLAYERSONLY ))
-			break;
-
-		pmtrace = &svgame.pmove->touchindex[i];
-		touch = EDICT_NUM( svgame.pmove->physents[pmtrace->ent].info );
-		if( touch == clent ) continue;
-
-		VectorCopy( pmtrace->deltavelocity, clent->v.velocity );
-		SV_ConvertPMTrace( &trace, pmtrace, touch );
-		SV_Impact( touch, clent, &trace );
+		// run custom impact function
+		svgame.physFuncs.PM_PlayerTouch( svgame.pmove, clent );
 	}
+	else
+	{
+		SV_LinkEdict( clent, true );
+		VectorCopy( clent->v.velocity, oldvel ); // save velocity
 
-	// restore velocity
-	VectorCopy( oldvel, clent->v.velocity );
+		// touch other objects
+		for( i = 0; i < svgame.pmove->numtouch; i++ )
+		{
+			// never touch the objects when "playersonly" is active
+			if( i == MAX_PHYSENTS || ( sv.hostflags & SVF_PLAYERSONLY ))
+				break;
+
+			pmtrace = &svgame.pmove->touchindex[i];
+			touch = EDICT_NUM( svgame.pmove->physents[pmtrace->ent].info );
+			if( touch == clent ) continue;
+
+			VectorCopy( pmtrace->deltavelocity, clent->v.velocity );
+			SV_ConvertPMTrace( &trace, pmtrace, touch );
+			SV_Impact( touch, clent, &trace );
+		}
+
+		// restore velocity
+		VectorCopy( oldvel, clent->v.velocity );
+	}
 
 	svgame.pmove->numtouch = 0;
 	svgame.globals->time = cl->timebase;
@@ -1178,7 +1186,7 @@ void SV_RunCmd( sv_client_t *cl, usercmd_t *ucmd, int random_seed )
 	svgame.dllFuncs.pfnPlayerPostThink( clent );
 	svgame.dllFuncs.pfnCmdEnd( clent );
 
-	if( !cl->fakeclient )
+	if( !FBitSet( cl->flags, FCL_FAKECLIENT ) )
 	{
 		SV_RestoreMoveInterpolant( cl );
 	}

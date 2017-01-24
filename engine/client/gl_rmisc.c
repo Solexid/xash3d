@@ -293,7 +293,6 @@ void R_ParseDetailTextures( const char *filename )
 			{
 				gltexture_t	*glt;
 
-				GL_SetTextureType( tex->dt_texturenum, TEX_DETAIL );
 				glt = R_GetTexture( tex->gl_texturenum );
 				glt->xscale = xScale;
 				glt->yscale = yScale;
@@ -462,7 +461,6 @@ void R_NewMap( void )
 		cl.worldmodel->leafs[i+1].efrags = NULL;
 
 	tr.skytexturenum = -1;
-	r_viewleaf = r_oldviewleaf = NULL;
 
 	// clearing texture chains
 	for( i = 0; i < cl.worldmodel->numtextures; i++ )

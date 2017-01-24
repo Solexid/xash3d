@@ -24,24 +24,22 @@ GNU General Public License for more details.
 #include "gl_vidnt.h"
 
 extern convar_t *renderinfo;
-convar_t	*gl_allow_software;
 convar_t	*gl_extensions;
 convar_t	*gl_alphabits;
 convar_t	*gl_stencilbits;
 convar_t	*gl_ignorehwgamma;
 convar_t	*gl_texture_anisotropy;
+convar_t	*gl_texture_lodbias;
+convar_t	*gl_texture_nearest;
 convar_t	*gl_compress_textures;
-convar_t	*gl_luminance_textures;
 convar_t	*gl_compensate_gamma_screenshots;
 convar_t	*gl_keeptjunctions;
-convar_t	*gl_texture_lodbias;
 convar_t	*gl_showtextures;
 convar_t	*gl_detailscale;
 convar_t	*gl_swapInterval;
 convar_t	*gl_check_errors;
 convar_t	*gl_allow_static;
 convar_t	*gl_allow_mirrors;
-convar_t	*gl_texturemode;
 convar_t	*gl_wireframe;
 convar_t	*gl_overview;
 convar_t	*gl_max_size;
@@ -80,7 +78,6 @@ convar_t	*mp_decals;
 convar_t	*vid_displayfrequency;
 convar_t	*vid_fullscreen;
 convar_t	*vid_gamma;
-convar_t	*vid_texgamma;
 convar_t	*vid_mode;
 
 byte		*r_temppool;
@@ -472,6 +469,12 @@ void ( APIENTRY *pglClientActiveTextureARB)( GLenum );
 void ( APIENTRY *pglGetCompressedTexImage)( GLenum target, GLint lod, const GLvoid* data );
 void ( APIENTRY *pglDrawRangeElements)( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices );
 void ( APIENTRY *pglDrawRangeElementsEXT)( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices );
+void ( APIENTRY *pglDrawElements)(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices);
+void ( APIENTRY *pglVertexPointer)(GLint size, GLenum type, GLsizei stride, const GLvoid *ptr);
+void ( APIENTRY *pglNormalPointer)(GLenum type, GLsizei stride, const GLvoid *ptr);
+void ( APIENTRY *pglColorPointer)(GLint size, GLenum type, GLsizei stride, const GLvoid *ptr);
+void ( APIENTRY *pglTexCoordPointer)(GLint size, GLenum type, GLsizei stride, const GLvoid *ptr);
+void ( APIENTRY *pglArrayElement)(GLint i);
 void ( APIENTRY *pglMultiTexCoord1f) (GLenum, GLfloat);
 void ( APIENTRY *pglMultiTexCoord2f) (GLenum, GLfloat, GLfloat);
 void ( APIENTRY *pglMultiTexCoord3f) (GLenum, GLfloat, GLfloat, GLfloat);
@@ -529,6 +532,7 @@ void ( APIENTRY *pglGetActiveUniformARB)(GLhandleARB programObj, GLuint index, G
 void ( APIENTRY *pglGetUniformfvARB)(GLhandleARB programObj, GLint location, GLfloat *params);
 void ( APIENTRY *pglGetUniformivARB)(GLhandleARB programObj, GLint location, GLint *params);
 void ( APIENTRY *pglGetShaderSourceARB)(GLhandleARB obj, GLsizei maxLength, GLsizei *length, GLcharARB *source);
+void ( APIENTRY *pglPolygonStipple)(const GLubyte *mask);
 void ( APIENTRY *pglTexImage3D)( GLenum target, GLint level, GLenum internalFormat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels );
 void ( APIENTRY *pglTexSubImage3D)( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels );
 void ( APIENTRY *pglCopyTexSubImage3D)( GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height );
@@ -542,6 +546,10 @@ void ( APIENTRY *pglDisableVertexAttribArrayARB)(GLuint index);
 void ( APIENTRY *pglBindAttribLocationARB)(GLhandleARB programObj, GLuint index, const GLcharARB *name);
 void ( APIENTRY *pglGetActiveAttribARB)(GLhandleARB programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLcharARB *name);
 GLint ( APIENTRY *pglGetAttribLocationARB)(GLhandleARB programObj, const GLcharARB *name);
+void ( APIENTRY *pglBindFragDataLocation)(GLuint programObj, GLuint index, const GLcharARB *name);
+void ( APIENTRY *pglVertexAttrib2fARB)( GLuint index, GLfloat x, GLfloat y );
+void ( APIENTRY *pglVertexAttrib2fvARB)( GLuint index, const GLfloat *v );
+void ( APIENTRY *pglVertexAttrib3fvARB)( GLuint index, const GLfloat *v );
 void ( APIENTRY *pglBindBufferARB) (GLenum target, GLuint buffer);
 void ( APIENTRY *pglDeleteBuffersARB) (GLsizei n, const GLuint *buffers);
 void ( APIENTRY *pglGenBuffersARB) (GLsizei n, GLuint *buffers);
@@ -558,9 +566,38 @@ void ( APIENTRY *pglEndQueryARB) (GLenum target);
 void ( APIENTRY *pglGetQueryivARB) (GLenum target, GLenum pname, GLint *params);
 void ( APIENTRY *pglGetQueryObjectivARB) (GLuint id, GLenum pname, GLint *params);
 void ( APIENTRY *pglGetQueryObjectuivARB) (GLuint id, GLenum pname, GLuint *params);
-void ( APIENTRY * pglSelectTextureSGIS) ( GLenum );
-void ( APIENTRY * pglMTexCoord2fSGIS) ( GLenum, GLfloat, GLfloat );
+typedef void ( APIENTRY *pglDebugProcARB)( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLcharARB* message, GLvoid* userParam );
+void ( APIENTRY *pglDebugMessageControlARB)( GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint* ids, GLboolean enabled );
+void ( APIENTRY *pglDebugMessageInsertARB)( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const char* buf );
+void ( APIENTRY *pglDebugMessageCallbackARB)( pglDebugProcARB callback, void* userParam );
+GLuint ( APIENTRY *pglGetDebugMessageLogARB)( GLuint count, GLsizei bufsize, GLenum* sources, GLenum* types, GLuint* ids, GLuint* severities, GLsizei* lengths, char* messageLog );
+GLboolean ( APIENTRY *pglIsRenderbuffer )(GLuint renderbuffer);
+void ( APIENTRY *pglBindRenderbuffer )(GLenum target, GLuint renderbuffer);
+void ( APIENTRY *pglDeleteRenderbuffers )(GLsizei n, const GLuint *renderbuffers);
+void ( APIENTRY *pglGenRenderbuffers )(GLsizei n, GLuint *renderbuffers);
+void ( APIENTRY *pglRenderbufferStorage )(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+void ( APIENTRY *pglRenderbufferStorageMultisample )(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
+void ( APIENTRY *pglGetRenderbufferParameteriv )(GLenum target, GLenum pname, GLint *params);
+GLboolean (APIENTRY *pglIsFramebuffer )(GLuint framebuffer);
+void ( APIENTRY *pglBindFramebuffer )(GLenum target, GLuint framebuffer);
+void ( APIENTRY *pglDeleteFramebuffers )(GLsizei n, const GLuint *framebuffers);
+void ( APIENTRY *pglGenFramebuffers )(GLsizei n, GLuint *framebuffers);
+GLenum ( APIENTRY *pglCheckFramebufferStatus )(GLenum target);
+void ( APIENTRY *pglFramebufferTexture1D )(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
+void ( APIENTRY *pglFramebufferTexture2D )(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
+void ( APIENTRY *pglFramebufferTexture3D )(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level, GLint layer);
+void ( APIENTRY *pglFramebufferTextureLayer )(GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer);
+void ( APIENTRY *pglFramebufferRenderbuffer )(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
+void ( APIENTRY *pglGetFramebufferAttachmentParameteriv )(GLenum target, GLenum attachment, GLenum pname, GLint *params);
+void ( APIENTRY *pglBlitFramebuffer )(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
+void ( APIENTRY *pglDrawBuffersARB)( GLsizei n, const GLenum *bufs );
+void ( APIENTRY *pglGenerateMipmap )( GLenum target );
+void ( APIENTRY *pglBindVertexArray )( GLuint array );
+void ( APIENTRY *pglDeleteVertexArrays )( GLsizei n, const GLuint *arrays );
+void ( APIENTRY *pglGenVertexArrays )( GLsizei n, const GLuint *arrays );
+GLboolean ( APIENTRY *pglIsVertexArray )( GLuint array );
 void ( APIENTRY * pglSwapInterval) ( int interval );
+extern void *pglGetProcAddress( const GLubyte * );
 #endif
 
 /*
@@ -597,7 +634,7 @@ GL_MaxTextureUnits
 int GL_MaxTextureUnits( void )
 {
 	if( GL_Support( GL_SHADER_GLSL100_EXT ))
-		return min( max( glConfig.max_texture_coords, glConfig.max_teximage_units ), MAX_TEXTURE_UNITS );
+		return Q_min( Q_max( glConfig.max_texture_coords, glConfig.max_teximage_units ), MAX_TEXTURE_UNITS );
 	return glConfig.max_texture_units;
 }
 
@@ -657,7 +694,11 @@ static void GL_SetDefaultState( void )
 	GL_SetDefaultTexState ();
 }
 
-
+/*
+===============
+R_SaveVideoMode
+===============
+*/
 void R_SaveVideoMode( int w, int h )
 {
 	glState.width = w;
@@ -672,7 +713,11 @@ void R_SaveVideoMode( int w, int h )
 	MsgDev( D_NOTE, "Set: [%dx%d]\n", w, h );
 }
 
-
+/*
+===============
+R_DescribeVIDMode
+===============
+*/
 qboolean R_DescribeVIDMode( int width, int height )
 {
 	int	i;
@@ -717,8 +762,8 @@ void VID_CheckChanges( void )
 	{
 		if( !VID_SetMode())
 		{
-			// can't initialize video subsystem
-			Host_NewInstance( va("#%s", GI->gamefolder ), "fallback to dedicated mode\n" );
+			Msg( "can't initialize video subsystem\n" );
+			Host_NewInstance( va("#%s", GI->gamefolder ), "stopped\n" );
 		}
 		else
 		{
@@ -737,8 +782,6 @@ GL_SetDefaults
 */
 static void GL_SetDefaults( void )
 {
-	int	i;
-
 	pglFinish();
 
 	pglClearColor( 0.5f, 0.5f, 0.5f, 1.0f );
@@ -767,39 +810,20 @@ static void GL_SetDefaults( void )
 	pglPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 	pglPolygonOffset( -1.0f, -2.0f );
 
-	// properly disable multitexturing at startup
-	for( i = (MAX_TEXTURE_UNITS - 1); i > 0; i-- )
-	{
-		if( i >= GL_MaxTextureUnits( ))
-			continue;
+	GL_CleanupAllTextureUnits();
 
-		GL_SelectTexture( i );
-		pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
-		pglDisable( GL_BLEND );
-		pglDisable( GL_TEXTURE_2D );
-	}
-
-	GL_SelectTexture( 0 );
 	pglDisable( GL_BLEND );
 	pglDisable( GL_ALPHA_TEST );
 	pglDisable( GL_POLYGON_OFFSET_FILL );
-	pglAlphaFunc( GL_GREATER, 0.0f );
+	pglAlphaFunc( GL_GEQUAL, 0.5f );
 	pglEnable( GL_TEXTURE_2D );
-	pglShadeModel( GL_FLAT );
+	pglShadeModel( GL_SMOOTH );
 
 	pglPointSize( 1.2f );
 	pglLineWidth( 1.2f );
 
-	GL_Cull( 0 );
+	GL_Cull( GL_NONE );
 	GL_FrontFace( 0 );
-
-	R_SetTextureParameters();
-
-	pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
-	pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-
-	pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
-	pglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
 }
 
 /*
@@ -815,19 +839,21 @@ void R_RenderInfo_f( void )
 	Msg( "GL_VERSION: %s\n", glConfig.version_string );
 
 	// don't spam about extensions
-	if( host.developer >= 4 )
+	if( host.developer >= D_REPORT )
 		Msg( "GL_EXTENSIONS: %s\n", glConfig.extensions_string );
 
 	Msg( "GL_MAX_TEXTURE_SIZE: %i\n", glConfig.max_2d_texture_size );
 
 	if( GL_Support( GL_ARB_MULTITEXTURE ))
 		Msg( "GL_MAX_TEXTURE_UNITS_ARB: %i\n", glConfig.max_texture_units );
-	if( GL_Support( GL_TEXTURECUBEMAP_EXT ))
+	if( GL_Support( GL_TEXTURE_CUBEMAP_EXT ))
 		Msg( "GL_MAX_CUBE_MAP_TEXTURE_SIZE_ARB: %i\n", glConfig.max_cubemap_size );
 	if( GL_Support( GL_ANISOTROPY_EXT ))
 		Msg( "GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: %.1f\n", glConfig.max_texture_anisotropy );
-	if( glConfig.texRectangle )
-		Msg( "GL_MAX_RECTANGLE_TEXTURE_SIZE_NV: %i\n", glConfig.max_2d_rectangle_size );
+	if( GL_Support( GL_TEXTURE_2D_RECT_EXT ))
+		Msg( "GL_MAX_RECTANGLE_TEXTURE_SIZE: %i\n", glConfig.max_2d_rectangle_size );
+	if( GL_Support( GL_TEXTURE_ARRAY_EXT ))
+		Msg( "GL_MAX_ARRAY_TEXTURE_LAYERS_EXT: %i\n", glConfig.max_2d_texture_layers );
 	if( GL_Support( GL_SHADER_GLSL100_EXT ))
 	{
 		Msg( "GL_MAX_TEXTURE_COORDS_ARB: %i\n", glConfig.max_texture_coords );
@@ -837,12 +863,11 @@ void R_RenderInfo_f( void )
 	}
 
 	Msg( "\n" );
-	Msg( "MODE: %i x %i\n", scr_width->integer, scr_height->integer );
+	Msg( "MODE: %i, %i x %i, %s\n", vid_mode->integer, scr_width->integer, scr_height->integer, vidmode[vid_mode->integer > 0 ? vid_mode->integer : 0].desc );
 	Msg( "GAMMA: %s\n", (glConfig.deviceSupportsGamma) ? "hardware" : "software" );
 	Msg( "\n" );
 	Msg( "PICMIP: %i\n", gl_picmip->integer );
 	Msg( "SKYMIP: %i\n", gl_skymip->integer );
-	Msg( "TEXTUREMODE: %s\n", gl_texturemode->string );
 	Msg( "VERTICAL SYNC: %s\n", gl_swapInterval->integer ? "enabled" : "disabled" );
 	Msg( "Color %d bits, Alpha %d bits, Depth %d bits, Stencil %d bits\n", glConfig.color_bits,
 		glConfig.alpha_bits, glConfig.depth_bits, glConfig.stencil_bits );
@@ -852,7 +877,6 @@ void R_RenderInfo_f( void )
 
 void GL_InitCommands( void )
 {
-	Cbuf_AddText( "vidlatch\n" );
 	Cbuf_Execute();
 
 	// system screen width and height (don't suppose for change from console at all)
@@ -867,7 +891,7 @@ void GL_InitCommands( void )
 	r_novis = Cvar_Get( "r_novis", "0", 0, "ignore vis information (perfomance test)" );
 	r_nocull = Cvar_Get( "r_nocull", "0", 0, "ignore frustrum culling (perfomance test)" );
 	r_faceplanecull = Cvar_Get( "r_faceplanecull", "1", 0, "ignore face plane culling (perfomance test)" );
-	r_detailtextures = Cvar_Get( "r_detailtextures", "1", CVAR_ARCHIVE, "enable detail textures support, use \"2\" for auto-generate mapname_detail.txt" );
+	r_detailtextures = Cvar_Get( "r_detailtextures", "1", CVAR_ARCHIVE, "enable detail textures support, use '2'' for autogenerate detail.txt" );
 	r_lockpvs = Cvar_Get( "r_lockpvs", "0", CVAR_CHEAT, "lockpvs area at current point (pvs test)" );
 	r_lockcull = Cvar_Get( "r_lockcull", "0", CVAR_CHEAT, "lock frustrum area at current point (cull test)" );
 	r_dynamic = Cvar_Get( "r_dynamic", "1", CVAR_ARCHIVE, "allow dynamic lighting (dlights, lightstyles)" );
@@ -884,9 +908,8 @@ void GL_InitCommands( void )
 	gl_picmip = Cvar_Get( "gl_picmip", "0", CVAR_GLCONFIG, "reduces resolution of textures by powers of 2" );
 	gl_skymip = Cvar_Get( "gl_skymip", "0", CVAR_GLCONFIG, "reduces resolution of skybox textures by powers of 2" );
 	gl_ignorehwgamma = Cvar_Get( "gl_ignorehwgamma", "0", CVAR_GLCONFIG, "ignore hardware gamma" );
-	gl_allow_software = Cvar_Get( "gl_allow_software", "0", CVAR_ARCHIVE, "allow OpenGL software emulation" );
 	gl_alphabits = Cvar_Get( "gl_alphabits", "8", CVAR_GLCONFIG, "pixelformat alpha bits (0 - auto)" );
-	gl_texturemode = Cvar_Get( "gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR", CVAR_ARCHIVE, "texture filter" );
+	gl_texture_nearest = Cvar_Get( "gl_texture_nearest", "0", CVAR_ARCHIVE, "disable texture filter" );
 	gl_max_size = Cvar_Get( "gl_max_size", "512", CVAR_ARCHIVE, "no effect in Xash3D just a legacy" );
 	gl_stencilbits = Cvar_Get( "gl_stencilbits", "8", CVAR_GLCONFIG, "pixelformat stencil bits (0 - auto)" );
 	gl_check_errors = Cvar_Get( "gl_check_errors", "1", CVAR_ARCHIVE, "ignore video engine errors" );
@@ -894,20 +917,19 @@ void GL_InitCommands( void )
 	gl_extensions = Cvar_Get( "gl_extensions", "1", CVAR_GLCONFIG, "allow gl_extensions" );
 	gl_detailscale = Cvar_Get( "gl_detailscale", "4.0", CVAR_ARCHIVE, "default scale applies while auto-generate list of detail textures" );
 	gl_texture_anisotropy = Cvar_Get( "gl_anisotropy", "2.0", CVAR_ARCHIVE, "textures anisotropic filter" );
-	gl_texture_lodbias =  Cvar_Get( "gl_texture_lodbias", "0.0", CVAR_ARCHIVE, "LOD bias for mipmapped textures" );
+	gl_texture_lodbias =  Cvar_Get( "gl_texture_lodbias", "0.0", CVAR_ARCHIVE, "LOD bias for mipmapped textures (performance|quality)" );
 	gl_compress_textures = Cvar_Get( "gl_compress_textures", "0", CVAR_GLCONFIG, "compress textures to safe video memory" );
-	gl_luminance_textures = Cvar_Get( "gl_luminance_textures", "0", CVAR_GLCONFIG, "force all textures to luminance" );
 	gl_msaa = Cvar_Get( "gl_msaa", "0", CVAR_GLCONFIG, "MSAA samples. Use with caution, engine may fail with some values" );
-	gl_compensate_gamma_screenshots = Cvar_Get( "gl_compensate_gamma_screenshots", "0", CVAR_ARCHIVE, "allow to apply gamma value for screenshots and snapshots" );
-	gl_keeptjunctions = Cvar_Get( "gl_keeptjunctions", "1", CVAR_ARCHIVE, "disable to reduce vertexes count but removing tjuncs causes blinking pixels" );
+	gl_compensate_gamma_screenshots = Cvar_Get( "gl_compensate_gamma_screenshots", "0", CVAR_ARCHIVE, "allow to apply gamma value for screenshots" );
+	gl_keeptjunctions = Cvar_Get( "gl_keeptjunctions", "1", CVAR_ARCHIVE, "but removing tjuncs causes blinking pixels" );
 	gl_allow_static = Cvar_Get( "gl_allow_static", "0", CVAR_ARCHIVE, "force to drawing non-moveable brushes as part of world (save FPS)" );
 	gl_allow_mirrors = Cvar_Get( "gl_allow_mirrors", "1", CVAR_ARCHIVE, "allow to draw mirror surfaces" );
-	gl_showtextures = Cvar_Get( "r_showtextures", "0", CVAR_CHEAT, "show all uploaded textures (type values from 1 to 13)" );
+	gl_showtextures = Cvar_Get( "r_showtextures", "0", CVAR_CHEAT, "show all uploaded textures" );
 	gl_finish = Cvar_Get( "gl_finish", "0", CVAR_ARCHIVE, "use glFinish instead of glFlush" );
 	gl_nosort = Cvar_Get( "gl_nosort", "0", CVAR_ARCHIVE, "disable sorting of translucent surfaces" );
 	gl_clear = Cvar_Get( "gl_clear", "0", CVAR_ARCHIVE, "clearing screen after each frame" );
 	gl_test = Cvar_Get( "gl_test", "0", 0, "engine developer cvar for quick testing new features" );
-	gl_wireframe = Cvar_Get( "gl_wireframe", "0", 0, "show wireframe overlay" );
+	gl_wireframe = Cvar_Get( "gl_wireframe", "0", CVAR_ARCHIVE, "show wireframe overlay" );
 	gl_overview = Cvar_Get( "dev_overview", "0", 0, "show level overview" );
 	// these cvar not used by engine but some mods requires this
 	Cvar_Get( "gl_polyoffset", "-0.1", 0, "polygon offset for decals" );
@@ -916,19 +938,16 @@ void GL_InitCommands( void )
 	gl_swapInterval->modified = true;
 
 	vid_gamma = Cvar_Get( "gamma", "1.0", CVAR_ARCHIVE, "gamma amount" );
-	vid_texgamma = Cvar_Get( "texgamma", "2.2", CVAR_GLCONFIG, "texgamma amount (default Half-Life artwork gamma)" );
 	vid_mode = Cvar_Get( "vid_mode", VID_AUTOMODE, CVAR_RENDERINFO, "display resolution mode" );
 	vid_fullscreen = Cvar_Get( "fullscreen", "0", CVAR_RENDERINFO, "set in 1 to enable fullscreen mode" );
 	vid_displayfrequency = Cvar_Get ( "vid_displayfrequency", "0", CVAR_RENDERINFO, "fullscreen refresh rate" );
 
 	Cmd_AddCommand( "r_info", R_RenderInfo_f, "display renderer info" );
-	Cmd_AddCommand( "texturelist", R_TextureList_f, "display loaded textures list" );
 }
 
 void GL_RemoveCommands( void )
 {
 	Cmd_RemoveCommand( "r_info");
-	Cmd_RemoveCommand( "texturelist" );
 }
 
 #ifdef WIN32
@@ -1018,8 +1037,8 @@ qboolean R_Init( void )
 		GL_RemoveCommands();
 		R_Free_OpenGL();
 
-		// can't initialize video subsystem
-		Host_NewInstance( va("#%s", GI->gamefolder ), "fallback to dedicated mode\n" );
+		MsgDev( D_ERROR, "can't initialize video subsystem\n" );
+		Host_NewInstance( va("#%s", GI->gamefolder ), "stopped" );
 		return false;
 	}
 
@@ -1110,6 +1129,6 @@ void GL_CheckForErrors_( const char *filename, const int fileline )
 		break;
 	}
 
-	Host_Error( "GL_CheckForErrors: %s (called at %s:%i)\n", str, filename, fileline );
+	MsgDev( D_ERROR, "OpenGL: %s (called at %s:%i)\n", str, filename, fileline );
 }
 #endif // XASH_DEDICATED

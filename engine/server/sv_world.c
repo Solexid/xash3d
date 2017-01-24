@@ -541,18 +541,14 @@ SV_FindTouchedLeafs
 */
 void SV_FindTouchedLeafs( edict_t *ent, mnode_t *node, int *headnode )
 {
-	mplane_t	*splitplane;
-	int	sides, leafnum;
+	int	sides;
 	mleaf_t	*leaf;
-
-	if( !node ) // if no collision model
-		return;
 
 	if( node->contents == CONTENTS_SOLID )
 		return;
-	
+
 	// add an efrag if the node is a leaf
-	if(  node->contents < 0 )
+	if( node->contents < 0 )
 	{
 		if( ent->num_leafs > ( MAX_ENT_LEAFS - 1 ))
 		{
@@ -563,53 +559,21 @@ void SV_FindTouchedLeafs( edict_t *ent, mnode_t *node, int *headnode )
 		else
 		{
 			leaf = (mleaf_t *)node;
-			leafnum = leaf - sv.worldmodel->leafs - 1;
-			ent->leafnums[ent->num_leafs] = leafnum;
-			ent->num_leafs++;			
+			ent->leafnums[ent->num_leafs] = leaf->cluster;
+			ent->num_leafs++;
 		}
 		return;
 	}
-	
-	// NODE_MIXED
-	splitplane = node->plane;
-	sides = BOX_ON_PLANE_SIDE( ent->v.absmin, ent->v.absmax, splitplane );
 
-	if( sides == 3 && *headnode == -1 )
+	// NODE_MIXED
+	sides = BOX_ON_PLANE_SIDE( ent->v.absmin, ent->v.absmax, node->plane );
+
+	if(( sides == 3 ) && ( *headnode == -1 ))
 		*headnode = node - sv.worldmodel->nodes;
-	
+
 	// recurse down the contacted sides
 	if( sides & 1 ) SV_FindTouchedLeafs( ent, node->children[0], headnode );
 	if( sides & 2 ) SV_FindTouchedLeafs( ent, node->children[1], headnode );
-}
-
-/*
-=============
-SV_HeadnodeVisible
-=============
-*/
-qboolean SV_HeadnodeVisible( mnode_t *node, byte *visbits, int *lastleaf )
-{
-	int	leafnum;
-
-	if( !node || node->contents == CONTENTS_SOLID )
-		return false;
-
-	if( node->contents < 0 )
-	{
-		leafnum = ((mleaf_t *)node - sv.worldmodel->leafs) - 1;
-
-		if(!( visbits[leafnum >> 3] & (1U << ( leafnum & 7 ))))
-			return false;
-
-		if( lastleaf )
-			*lastleaf = leafnum;
-		return true;
-	}
-
-	if( SV_HeadnodeVisible( node->children[0], visbits, lastleaf ))
-		return true;
-
-	return SV_HeadnodeVisible( node->children[1], visbits, lastleaf );
 }
 
 /*
@@ -631,9 +595,9 @@ void SV_LinkEdict( edict_t *ent, qboolean touch_triggers )
 
 	if( ent->v.movetype == MOVETYPE_FOLLOW && SV_IsValidEdict( ent->v.aiment ))
 	{
+		Q_memcpy( ent->leafnums, ent->v.aiment->leafnums, sizeof( ent->leafnums ));
 		ent->headnode = ent->v.aiment->headnode;
 		ent->num_leafs = ent->v.aiment->num_leafs;
-		Q_memcpy( ent->leafnums, ent->v.aiment->leafnums, sizeof( ent->leafnums ));
 	}
 	else
 	{
@@ -1543,7 +1507,7 @@ static qboolean SV_RecursiveLightPoint( model_t *model, mnode_t *node, const vec
 	msurface_t	*surf;
 	mtexinfo_t	*tex;
 	float		front, back, scale, frac;
-	int		i, map, size, s, t;
+	int		i, map, size, s, t, sample_size;
 	color24		*lm;
 	vec3_t		mid;
 
@@ -1581,7 +1545,7 @@ static qboolean SV_RecursiveLightPoint( model_t *model, mnode_t *node, const vec
 
 	// check for impact on this node
 	surf = model->surfaces + node->firstsurface;
-
+	sample_size = Mod_SampleSizeForFace( surf );
 	for( i = 0; i < node->numsurfaces; i++, surf++ )
 	{
 		tex = surf->texinfo;
@@ -1595,16 +1559,16 @@ static qboolean SV_RecursiveLightPoint( model_t *model, mnode_t *node, const vec
 		if(( s < 0.0f || s > surf->extents[0] ) || ( t < 0.0f || t > surf->extents[1] ))
 			continue;
 
-		s /= LM_SAMPLE_SIZE;
-		t /= LM_SAMPLE_SIZE;
+		s /= sample_size;
+		t /= sample_size;
 
 		if( !surf->samples )
 			return true;
 
 		VectorClear( sv_pointColor );
 
-		lm = surf->samples + (t * ((surf->extents[0] / LM_SAMPLE_SIZE) + 1) + s);
-		size = ((surf->extents[0] / LM_SAMPLE_SIZE) + 1) * ((surf->extents[1] / LM_SAMPLE_SIZE) + 1);
+		lm = surf->samples + (t * ((surf->extents[0] / sample_size) + 1) + s);
+		size = ((surf->extents[0] / sample_size) + 1) * ((surf->extents[1] / sample_size) + 1);
 
 		for( map = 0; map < MAXLIGHTMAPS && surf->styles[map] != 255; map++ )
 		{
@@ -1634,7 +1598,7 @@ void SV_RunLightStyles( void )
 	// run lightstyles animation
 	for( i = 0, ls = sv.lightstyles; i < MAX_LIGHTSTYLES; i++, ls++ )
 	{
-		ls->time += host.frametime;
+		ls->time += sv.frametime;
 		ofs = (ls->time * 10);
 
 		if( ls->length == 0 ) ls->value = scale; // disable this light
@@ -1666,10 +1630,10 @@ void SV_SetLightStyle( int style, const char* s, float f )
 	if( sv.state != ss_active ) return;
 
 	// tell the clients about changed lightstyle
-	BF_WriteByte( &sv.reliable_datagram, svc_lightstyle );
-	BF_WriteByte( &sv.reliable_datagram, style );
-	BF_WriteString( &sv.reliable_datagram, sv.lightstyles[style].pattern );
-	BF_WriteFloat( &sv.reliable_datagram, sv.lightstyles[style].time );
+	MSG_WriteByte( &sv.reliable_datagram, svc_lightstyle );
+	MSG_WriteByte( &sv.reliable_datagram, style );
+	MSG_WriteString( &sv.reliable_datagram, sv.lightstyles[style].pattern );
+	MSG_WriteFloat( &sv.reliable_datagram, sv.lightstyles[style].time );
 }
 
 /*

@@ -35,8 +35,8 @@ CEngineSurface :: CEngineSurface( Panel *embeddedPanel ):SurfaceBase( embeddedPa
 	_drawTextColor[0] = _drawTextColor[1] = _drawTextColor[2] = _drawTextColor[3] = 255;
 
 	_surfaceExtents[0] = _surfaceExtents[1] = 0;
-	//_surfaceExtents[2] = menu.globals->scrWidth;
-	//_surfaceExtents[3] = menu.globals->scrHeight;
+	//_surfaceExtents[2] = gameui.globals->scrWidth;
+	//_surfaceExtents[3] = gameui.globals->scrHeight;
 	embeddedPanel->getSize(_surfaceExtents[2], _surfaceExtents[3]);
 	_drawTextPos[0] = _drawTextPos[1] = 0;
 	_hCurrentFont = null;

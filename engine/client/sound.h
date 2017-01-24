@@ -20,10 +20,6 @@ extern byte *sndpool;
 
 #include "mathlib.h"
 
-// local flags (never sending acorss the net)
-#define SND_LOCALSOUND	(1U << 9)	// not paused, not looped, for internal use
-#define SND_STOP_LOOPING	(1U << 10)	// stop all looping sounds on the entity.
-
 // sound engine rate defines
 #define SOUND_11k		11025	// 11khz sample rate
 #define SOUND_16k		16000	// 16khz sample rate
@@ -31,6 +27,7 @@ extern byte *sndpool;
 #define SOUND_32k		32000	// 32khz sample rate
 #define SOUND_44k		44100	// 44khz sample rate
 #define SOUND_DMA_SPEED	SOUND_44k	// hardware playback rate
+#define DMA_MSEC_PER_SAMPLE		((float)(1000.0 / SOUND_DMA_SPEED))
 
 #define SND_TRACE_UPDATE_MAX  	2	// max of N channels may be checked for obscured source per frame
 #define SND_RADIUS_MAX		240.0f	// max sound source radius
@@ -40,9 +37,9 @@ extern byte *sndpool;
 // calculate gain based on atmospheric attenuation.
 // as gain excedes threshold, round off (compress) towards 1.0 using spline
 #define SND_GAIN_COMP_EXP_MAX		2.5f	// Increasing SND_GAIN_COMP_EXP_MAX fits compression curve
-					// more closely to original gain curve as it approaches 1.0.  
+                    // more closely to original gain curve as it approaches 1.0.
 #define SND_GAIN_FADE_TIME		0.25f	// xfade seconds between obscuring gain changes
-#define SND_GAIN_COMP_EXP_MIN		0.8f	
+#define SND_GAIN_COMP_EXP_MIN		0.8f
 #define SND_GAIN_COMP_THRESH		0.5f	// gain value above which gain curve is rounded to approach 1.0
 #define SND_DB_MAX			140.0f	// max db of any sound source
 #define SND_DB_MED			90.0f	// db at which compression curve changes
@@ -75,16 +72,21 @@ extern byte *sndpool;
 #define PAINTBUFFER		(g_curpaintbuffer)
 #define CPAINTBUFFERS	3
 
+// sound mixing buffer
+
+#define CPAINTFILTERMEM		3
+#define CPAINTFILTERS		4	// maximum number of consecutive upsample passes per paintbuffer
+
+#define S_RAW_SOUND_IDLE_SEC		10	// time interval for idling raw sound before it's freed
+#define S_RAW_SOUND_BACKGROUNDTRACK	-2
+#define S_RAW_SOUND_SOUNDTRACK	-1
+#define S_RAW_SAMPLES_PRECISION_BITS	14
+
 typedef struct
 {
 	int		left;
 	int		right;
 } portable_samplepair_t;
-
-// sound mixing buffer
-
-#define CPAINTFILTERMEM		3
-#define CPAINTFILTERS		4	// maximum number of consecutive upsample passes per paintbuffer
 
 typedef struct
 {
@@ -104,7 +106,6 @@ typedef struct sfx_s
 	struct sfx_s	*hashNext;
 } sfx_t;
 
-extern portable_samplepair_t	drybuffer[];
 extern portable_samplepair_t	paintbuffer[];
 extern portable_samplepair_t	roombuffer[];
 extern portable_samplepair_t	temppaintbuffer[];
@@ -154,6 +155,21 @@ typedef struct
 	qboolean		finished;
 } mixer_t;
 
+typedef struct
+{
+	int			entnum;
+	int			master_vol;
+	int			leftvol;		// 0-255 left volume
+	int			rightvol;		// 0-255 right volume
+	float			dist_mult;	// distance multiplier (attenuation/clipK)
+	vec3_t			origin;		// only use if fixed_origin is set
+	float			radius;		// radius of this sound effect
+	volatile uint		s_rawend;
+	size_t			max_samples;	// buffer length
+	portable_samplepair_t	rawsamples[1];	// variable sized
+} rawchan_t;
+
+
 struct channel_s
 {
 	char		name[16];		// keept sentence name
@@ -163,7 +179,7 @@ struct channel_s
 	int		rightvol;		// 0-255 right volume
 
 	int		entnum;		// entity soundsource
-	int		entchannel;	// sound channel (CHAN_STREAM, CHAN_VOICE, etc.)	
+	int		entchannel;	// sound channel (CHAN_STREAM, CHAN_VOICE, etc.)
 	vec3_t		origin;		// only use if fixed_origin is set
 	float		dist_mult;	// distance multiplier (attenuation/clipK)
 	int		master_vol;	// 0-255 master volume
@@ -204,8 +220,9 @@ typedef struct
 	qboolean		inmenu;		// listener in-menu ?
 	qboolean		paused;
 	qboolean		streaming;	// playing AVI-file
-	qboolean		lerping;		// lerp stream ?
 	qboolean		stream_paused;	// pause only background track
+
+	byte		pasbytes[(MAX_MAP_LEAFS+7)/8];// actual PHS for current frame
 } listener_t;
 
 typedef struct
@@ -234,14 +251,15 @@ void SNDDMA_Submit( void );
 
 #define MAX_DYNAMIC_CHANNELS	(28 + NUM_AMBIENTS)
 #define MAX_CHANNELS	(128 + MAX_DYNAMIC_CHANNELS)	// Scourge Of Armagon has too many static sounds on hip2m4.bsp
+#define MAX_RAW_CHANNELS 16
 #define MAX_RAW_SAMPLES	8192
 
 extern sound_t	ambient_sfx[NUM_AMBIENTS];
 extern qboolean	snd_ambient;
 extern channel_t	channels[MAX_CHANNELS];
+extern rawchan_t	*raw_channels[MAX_RAW_CHANNELS];
 extern int	total_channels;
 extern int	paintedtime;
-extern int	s_rawend;
 extern int	soundtime;
 extern dma_t	dma;
 extern listener_t	s_listener;
@@ -254,11 +272,8 @@ extern convar_t	*s_mixahead;
 extern convar_t	*s_lerping;
 extern convar_t	*dsp_off;
 extern convar_t	*s_test;
-extern convar_t	*s_phs;
 extern convar_t *s_reverse_channels;
 extern convar_t	*dsp_room;
-
-extern portable_samplepair_t		s_rawsamples[MAX_RAW_SAMPLES];
 
 void S_InitScaletable( void );
 wavdata_t *S_LoadSound( sfx_t *sfx );
@@ -305,10 +320,15 @@ channel_t *SND_PickDynamicChannel( int entnum, int channel, sfx_t *sfx );
 channel_t *SND_PickStaticChannel( int entnum, sfx_t *sfx, const vec3_t pos );
 int S_GetCurrentStaticSounds( soundlist_t *pout, int size );
 int S_GetCurrentDynamicSounds( soundlist_t *pout, int size );
-sfx_t *S_GetSfxByHandle( sound_t handle );
+rawchan_t *S_FindRawChannel( int entnum, qboolean create );
+void S_RawSamples( uint samples, uint rate, word width, word channels, const byte *data, int entnum );
+void S_StopSound( int entnum, int channel, const char *soundname );
+uint S_GetRawSamplesLength( int entnum );
+void S_ClearRawChannel( int entnum );
 void S_StopSound( int entnum, int channel, const char *soundname );
 void S_StopAllSounds( void );
 void S_FreeSounds( void );
+sfx_t *S_GetSfxByHandle( sound_t handle );
 
 //
 // s_mouth.c

@@ -68,6 +68,8 @@ typedef struct cldll_func_s
 	// Xash3D extension
 	int	(*pfnGetRenderInterface)( int version, render_api_t *renderfuncs, render_interface_t *callback );
 	void	(*pfnClipMoveToEntity)( struct physent_s *pe, const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end, struct pmtrace_s *tr );
+	void	(*pfnUpdateEntityState)( cl_entity_t *ent, entity_state_t *newstate, int noInterp ); // custom interp
+	void	(*pfnInterpolateEntity)( cl_entity_t *ent, float lerpFrac );
 	// More extenstions for the extensions god! (SDL Xash port)
 	int (*pfnTouchEvent)( int fingerID, float x, float y, float dx, float dy );
 	void (*pfnMoveEvent)( float forwardmove, float sidemove );

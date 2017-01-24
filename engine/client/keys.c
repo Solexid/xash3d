@@ -46,18 +46,18 @@ keyname_t keynames[] =
 {"RIGHTARROW",	K_RIGHTARROW,	"+right"		},
 {"ALT",		K_ALT,		"+strafe"		},
 {"CTRL",		K_CTRL,		"+attack"		},
-{"SHIFT",		K_SHIFT,		"+speed"		}, // replace with +attack2 ?
+{"SHIFT",		K_SHIFT,		"+speed"		},
 {"CAPSLOCK",	K_CAPSLOCK,	""		},
 {"F1",		K_F1,		"cmd help"	},
 {"F2",		K_F2,		"menu_savegame"	},
 {"F3",		K_F3,		"menu_loadgame"	},
-{"F4",		K_F4,		"menu_keys"	},
-{"F5",		K_F5,		"menu_startserver"	},
+{"F4",		K_F4,		"menu_controls"	},
+{"F5",		K_F5,		"menu_creategame" },
 {"F6",		K_F6,		"savequick"	},
 {"F7",		K_F7,		"loadquick"	},
 {"F8",		K_F8,		"stop"		},
 {"F9",		K_F9,		""		},
-{"F10",		K_F10,		"menu_quit"	},
+{"F10",		K_F10,		"menu_main"	},
 {"F11",		K_F11,		""		},
 {"F12",		K_F12,		"screenshot"	},
 {"INS",		K_INS,		""		},
@@ -141,7 +141,7 @@ Key_IsDown
 */
 qboolean Key_IsDown( int keynum )
 {
-	if ( keynum == -1 )
+	if( keynum == -1 )
 		return false;
 	return keys[keynum].down;
 }
@@ -607,6 +607,13 @@ void GAME_EXPORT Key_Event( int key, qboolean down )
 		switch( cls.key_dest )
 		{
 		case key_game:
+			if( gl_showtextures->integer )
+			{
+				// close texture atlas
+				Cvar_SetFloat( "r_showtextures", 0.0f );
+				return;
+			}
+
 			if( host.mouse_visible && cls.state != ca_cinematic )
 			{
 				clgame.dllFuncs.pfnKey_Event( down, key, keys[key].binding );
@@ -643,10 +650,10 @@ void GAME_EXPORT Key_Event( int key, qboolean down )
 		else if( down && ( key == 241 ) )
 			SDLash_EnableTextInput( false );
 		*/
-		if( !menu.use_text_api )
+		if( !gameui.use_text_api )
 			Key_EnableTextInput( true, false );
 		//pass printable chars for old menus
-		if( !menu.use_text_api && !host.textmode && down && ( key >= 32 ) && ( key <= 'z' ) )
+		if( !gameui.use_text_api && !host.textmode && down && ( key >= 32 ) && ( key <= 'z' ) )
 		{
 			if( Key_IsDown( K_SHIFT ) )
 			{

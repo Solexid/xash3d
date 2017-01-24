@@ -56,10 +56,10 @@ loading and unpack to wav any known sound
 */
 wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 {
-          const char	*ext = FS_FileExtension( filename );
+	const char	*ext = FS_FileExtension( filename );
 	string		path, loadname;
 	qboolean		anyformat = true;
-	fs_offset_t		filesize = 0;
+	int		filesize = 0;
 	const loadwavfmt_t	*format;
 	byte		*f;
 
@@ -68,7 +68,7 @@ wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 
 	if( Q_stricmp( ext, "" ))
 	{
-		// we need to compare file extension with list of supported formats
+		// we needs to compare file extension with list of supported formats
 		// and be sure what is real extension, not a filename with dot
 		for( format = sound.loadformats; format && format->formatstring; format++ )
 		{
@@ -93,12 +93,12 @@ wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 			f = FS_LoadFile( path, &filesize, false );
 			if( f && filesize > 0 )
 			{
-				if( format->loadfunc( path, f, (size_t)filesize ))
+				if( format->loadfunc( path, f, filesize ))
 				{
 					Mem_Free(f); // release buffer
 					return SoundPack(); // loaded
 				}
-				else Mem_Free(f); // release buffer 
+				else Mem_Free(f); // release buffer
 			}
 		}
 	}

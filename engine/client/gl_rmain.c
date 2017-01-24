@@ -32,9 +32,6 @@ float		gldepthmin, gldepthmax;
 ref_params_t	r_lastRefdef;
 ref_instance_t	RI, prevRI;
 
-mleaf_t		*r_viewleaf, *r_oldviewleaf;
-mleaf_t		*r_viewleaf2, *r_oldviewleaf2;
-
 static int R_RankForRenderMode( cl_entity_t *ent )
 {
 	switch( ent->curstate.rendermode )
@@ -747,35 +744,8 @@ R_FindViewLeaf
 */
 void R_FindViewLeaf( void )
 {
-	float	height;
-	mleaf_t	*leaf;
-	vec3_t	tmp;
-
-	r_oldviewleaf = r_viewleaf;
-	r_oldviewleaf2 = r_viewleaf2;
-	leaf = Mod_PointInLeaf( RI.pvsorigin, cl.worldmodel->nodes );
-	r_viewleaf2 = r_viewleaf = leaf;
-	height = RI.waveHeight ? RI.waveHeight : 16;
-
-	// check above and below so crossing solid water doesn't draw wrong
-	if( leaf->contents == CONTENTS_EMPTY )
-	{
-		// look down a bit
-		VectorCopy( RI.pvsorigin, tmp );
-		tmp[2] -= height;
-		leaf = Mod_PointInLeaf( tmp, cl.worldmodel->nodes );
-		if(( leaf->contents != CONTENTS_SOLID ) && ( leaf != r_viewleaf2 ))
-		r_viewleaf2 = leaf;
-	}
-	else
-	{
-		// look up a bit
-		VectorCopy( RI.pvsorigin, tmp );
-		tmp[2] += height;
-		leaf = Mod_PointInLeaf( tmp, cl.worldmodel->nodes );
-		if(( leaf->contents != CONTENTS_SOLID ) && ( leaf != r_viewleaf2 ))
-		r_viewleaf2 = leaf;
-	}
+	RI.oldviewleaf = RI.viewleaf;
+	RI.viewleaf = Mod_PointInLeaf( RI.pvsorigin, cl.worldmodel->nodes );
 }
 
 /*
@@ -807,7 +777,6 @@ static void R_SetupFrame( void )
 		VectorCopy( RI.vup, RI.cull_vup );
 	}
 
-	R_AnimateLight();
 	R_RunViewmodelEvents();
 
 	// sort opaque entities by model type to avoid drawing model shadows under alpha-surfaces
@@ -822,11 +791,9 @@ static void R_SetupFrame( void )
 	// current viewleaf
 	if( RI.drawWorld )
 	{
-		RI.waveHeight = cl.refdef.movevars->waveHeight * 2.0f;	// set global waveheight
 		RI.isSkyVisible = false; // unknown at this moment
 
-		if(!( RI.params & RP_OLDVIEWLEAF ))
-			R_FindViewLeaf();
+		R_FindViewLeaf();
 	}
 }
 
@@ -1001,13 +968,13 @@ static void R_CheckFog( void )
 
 	RI.fogEnabled = false;
 
-	if( RI.refdef.waterlevel < 2 || !RI.drawWorld || !r_viewleaf )
+	if( RI.refdef.waterlevel < 2 || !RI.drawWorld || !RI.viewleaf )
 		return;
 
 	ent = CL_GetWaterEntity( RI.vieworg );
 	if( ent && ent->model && ent->model->type == mod_brush && ent->curstate.skin < 0 )
 		cnt = ent->curstate.skin;
-	else cnt = r_viewleaf->contents;
+	else cnt = RI.viewleaf->contents;
 
 	if( IsLiquidContents( RI.cached_contents ) && !IsLiquidContents( cnt ))
 	{
@@ -1040,8 +1007,8 @@ static void R_CheckFog( void )
 		}
 		else
 		{
-			tex = R_RecursiveFindWaterTexture( r_viewleaf->parent, NULL, false );
-			if( tex ) RI.cached_contents = r_viewleaf->contents;
+			tex = R_RecursiveFindWaterTexture( RI.viewleaf->parent, NULL, false );
+			if( tex ) RI.cached_contents = RI.viewleaf->contents;
 		}
 
 		if( !tex ) return;	// no valid fogs
@@ -1123,7 +1090,7 @@ void R_DrawEntitiesOnList( void )
 	}
 
 	if( !RI.refdef.onlyClientDraw )
-          {
+	{
 		CL_DrawBeams( false );
 	}
 
@@ -1169,7 +1136,10 @@ void R_DrawEntitiesOnList( void )
 	}
 
 	if( RI.drawWorld )
+	{
+		pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
 		clgame.dllFuncs.pfnDrawTransparentTriangles ();
+	}
 
 	if( !RI.refdef.onlyClientDraw )
 	{
@@ -1187,7 +1157,8 @@ void R_DrawEntitiesOnList( void )
 
 	R_DrawViewModel();
 
-	CL_ExtraUpdate();
+	if( !FBitSet( host.features, ENGINE_FIXED_FRAMERATE ) )
+		CL_ExtraUpdate();
 }
 
 /*
@@ -1215,7 +1186,8 @@ void R_RenderScene( const ref_params_t *fd )
 	R_CheckFog();
 	R_DrawWorld();
 
-	CL_ExtraUpdate ();	// don't let sound get messed up if going slow
+	if( !FBitSet( host.features, ENGINE_FIXED_FRAMERATE ) )
+		CL_ExtraUpdate();	// don't let sound get messed up if going slow
 
 	R_DrawEntitiesOnList();
 
@@ -1249,7 +1221,7 @@ void R_BeginFrame( qboolean clearScene )
 		else
 		{
 			glConfig.softwareGammaUpdate = true;
-			BuildGammaTable( vid_gamma->value, vid_texgamma->value );
+			BuildGammaTable( vid_gamma->value, GAMMA );
 			GL_RebuildLightmaps();
 			glConfig.softwareGammaUpdate = false;
 		}
@@ -1263,13 +1235,14 @@ void R_BeginFrame( qboolean clearScene )
 
 	// texturemode stuff
 	// update texture parameters
-	if( gl_texturemode->modified || gl_texture_anisotropy->modified || gl_texture_lodbias ->modified )
+	if( gl_texture_nearest->modified || gl_texture_anisotropy->modified || gl_texture_lodbias ->modified )
 		R_SetTextureParameters();
 
 	// swapinterval stuff
 	GL_UpdateSwapInterval();
 
-	CL_ExtraUpdate ();
+	if( !FBitSet( host.features, ENGINE_FIXED_FRAMERATE ))
+		CL_ExtraUpdate ();
 }
 
 /*
@@ -1386,7 +1359,7 @@ void R_DrawCubemapView( const vec3_t origin, const vec3_t angles, int size )
 
 	R_RenderScene( fd );
 
-	r_oldviewleaf = r_viewleaf = NULL;		// force markleafs next frame
+	RI.oldviewleaf = RI.viewleaf = NULL;		// force markleafs next frame
 }
 
 static int GL_RenderGetParm( int parm, int arg )
@@ -1413,6 +1386,12 @@ static int GL_RenderGetParm( int parm, int arg )
 	case PARM_TEX_ENCODE:
 		glt = R_GetTexture( arg );
 		return glt->encode;
+	case PARM_TEX_MIPCOUNT:
+		glt = R_GetTexture( arg );
+		return glt->numMips;
+	case PARM_TEX_DEPTH:
+		glt = R_GetTexture( arg );
+		return glt->depth;
 	case PARM_TEX_SKYBOX:
 		ASSERT( arg >= 0 && arg < 6 );
 		return tr.skyboxTextures[arg];
@@ -1422,7 +1401,7 @@ static int GL_RenderGetParm( int parm, int arg )
 		ASSERT( arg >= 0 && arg < MAX_LIGHTMAPS );
 		return tr.lightmapTextures[arg];
 	case PARM_SKY_SPHERE:
-		return world.sky_sphere;
+		return world.sky_sphere && !world.custom_skybox;
 	case PARM_WORLD_VERSION:
 		if( cls.state != ca_active )
 			return bmodel_version;
@@ -1459,9 +1438,6 @@ static int GL_RenderGetParm( int parm, int arg )
 		return glt->cacheframe;
 	case PARM_MAP_HAS_DELUXE:
 		return (world.deluxedata != NULL);
-	case PARM_TEX_TYPE:
-		glt = R_GetTexture( arg );
-		return glt->texType;
 	case PARM_CACHEFRAME:
 		return world.load_sequence;
 	case PARM_MAX_IMAGE_UNITS:
@@ -1470,6 +1446,16 @@ static int GL_RenderGetParm( int parm, int arg )
 		return (cls.state == ca_active);
 	case PARM_REBUILD_GAMMA:
 		return glConfig.softwareGammaUpdate;
+	case PARM_DEDICATED_SERVER:
+		return (host.type == HOST_DEDICATED);
+	case PARM_SURF_SAMPLESIZE:
+		if( arg >= 0 && arg < cl.worldmodel->numsurfaces )
+			return Mod_SampleSizeForFace( &cl.worldmodel->surfaces[arg] );
+		return LM_SAMPLE_SIZE;
+	case PARM_GL_CONTEXT_TYPE:
+		return glConfig.context;
+	case PARM_GLES_WRAPPER:
+		return glConfig.wrapper;
 	}
 	return 0;
 }
@@ -1608,6 +1594,11 @@ static int GL_LoadTextureNoFilter( const char *name, const byte *buf, size_t siz
 	return GL_LoadTexture( name, buf, size, flags, NULL );	
 }
 
+static int GL_LoadTextureArrayNoFilter( const char **names, int flags )
+{
+	return GL_LoadTextureArray( names, flags, NULL );
+}
+
 static const ref_overview_t *GL_GetOverviewParms( void )
 {
 	return &clgame.overView;
@@ -1646,8 +1637,8 @@ static char **pfnGetFilesList( const char *pattern, int *numFiles, int gamediron
 	if( numFiles ) *numFiles = t->numfilenames;
 	return t->filenames;
 }
-	
-static render_api_t gRenderAPI =
+
+render_api_t gRenderAPI =
 {
 	GL_RenderGetParm,
 	R_GetDetailScaleForTexture,
@@ -1666,8 +1657,8 @@ static render_api_t gRenderAPI =
 	GL_TextureData,
 	GL_LoadTextureNoFilter,
 	(void*)GL_CreateTexture,
-	GL_SetTextureType,
-	GL_TextureUpdateCache,
+	GL_LoadTextureArrayNoFilter,
+	GL_CreateTextureArray,
 	GL_FreeTexture,
 	DrawSingleDecal,
 	R_DecalSetupVerts,
@@ -1687,7 +1678,7 @@ static render_api_t gRenderAPI =
 	GL_TexGen,
 	GL_TextureTarget,
 	GL_SetTexCoordArrayMode,
-	NULL,
+	GL_GetProcAddress,
 	NULL,
 	NULL,
 	NULL,
@@ -1722,7 +1713,7 @@ qboolean R_InitRenderAPI( void )
 	{
 		if( clgame.dllFuncs.pfnGetRenderInterface( CL_RENDER_INTERFACE_VERSION, &gRenderAPI, &clgame.drawFuncs ))
 		{
-			MsgDev( D_AICONSOLE, "CL_LoadProgs: ^2initailized extended RenderAPI ^7ver. %i\n", CL_RENDER_INTERFACE_VERSION );
+			MsgDev( D_REPORT, "CL_LoadProgs: ^2initailized extended RenderAPI ^7ver. %i\n", CL_RENDER_INTERFACE_VERSION );
 			return true;
 		}
 

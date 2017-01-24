@@ -75,13 +75,23 @@ void GAME_EXPORT CL_PopPMStates( void )
 
 /*
 =============
+CL_ComputePlayerOrigin
+
+FIXME: implement
+=============
+*/
+void CL_ComputePlayerOrigin( cl_entity_t *clent )
+{
+}
+
+/*
+=============
 CL_SetUpPlayerPrediction
 
 =============
 */
 void GAME_EXPORT CL_SetUpPlayerPrediction( int dopred, int includeLocal )
 {
-#if 0
 	int i;
 	entity_state_t     *state;
 	predicted_player_t *player;
@@ -89,9 +99,9 @@ void GAME_EXPORT CL_SetUpPlayerPrediction( int dopred, int includeLocal )
 
 	for( i = 0; i < MAX_CLIENTS; i++ )
 	{
-		state = cl.frames[cl.parsecountmod].playerstate[i];
+		state = &cl.frames[cl.parsecountmod].playerstate[i];
+		player = &cl.predicted_players[i];
 
-		player = cl.predicted_players[j];
 		player->active = false;
 
 		if( state->messagenum != cl.parsecount )
@@ -100,21 +110,23 @@ void GAME_EXPORT CL_SetUpPlayerPrediction( int dopred, int includeLocal )
 		if( !state->modelindex )
 			continue;
 
-		ent = CL_GetEntityByIndex( j + 1 );
+		ent = CL_GetEntityByIndex( i + 1 );
 
 		if( !ent ) // in case
 			continue;
 
 		// special for EF_NODRAW and local client?
-		if( state->effects & EF_NODRAW && !includeLocal )
+		if( FBitSet( state->effects, EF_NODRAW ) && !includeLocal )
 		{
-			if( cl.playernum == j )
+			if( cl.playernum == i )
 				continue;
 
 			player->active   = true;
 			player->movetype = state->movetype;
 			player->solid    = state->solid;
 			player->usehull  = state->usehull;
+
+			CL_ComputePlayerOrigin( ent );
 
 			VectorCopy( ent->origin, player->origin );
 			VectorCopy( ent->angles, player->angles );
@@ -127,14 +139,13 @@ void GAME_EXPORT CL_SetUpPlayerPrediction( int dopred, int includeLocal )
 			player->usehull  = state->usehull;
 
 			// don't rewrite origin and angles of local client
-			if( cl.playernum == j )
+			if( cl.playernum == i )
 				continue;
 
 			VectorCopy(state->origin, player->origin);
 			VectorCopy(state->angles, player->angles);
 		}
 	}
-#endif
 }
 
 
@@ -320,7 +331,7 @@ pmove must be setup with world and solid entity hulls before calling
 */
 void GAME_EXPORT CL_SetSolidPlayers( int playernum )
 {
-	int		       j;
+	int		       i;
 	cl_entity_t	   *ent;
 	entity_state_t *state;
 	physent_t      *pe;
@@ -328,28 +339,25 @@ void GAME_EXPORT CL_SetSolidPlayers( int playernum )
 	if( !cl_solid_players->integer )
 		return;
 
-	for( j = 0; j < cl.maxclients; j++ )
+	for( i = 0; i < cl.maxclients; i++ )
 	{
 		// the player object never gets added
-		if( j == playernum )
+		if( i == playernum )
 			continue;
 
-		ent = CL_GetEntityByIndex( j + 1 );
+		ent = CL_GetEntityByIndex( i + 1 );
 
 		if( !ent || !ent->player )
 			continue; // not present this frame
 
 
 #if 1 // came from SetUpPlayerPrediction
-		state = cl.frames[cl.parsecountmod].playerstate + j;
+		state = cl.frames[cl.parsecountmod].playerstate + i;
 
-		if( ent->curstate.messagenum != cl.parsecount )
-			continue; // not present this frame [2]
+		if( !state->movetype )
+			continue; // dead
 
-		if( ent->curstate.movetype == MOVETYPE_NONE )
-			continue;
-
-		if( state->effects & EF_NODRAW )
+		if( FBitSet( state->effects, EF_NODRAW ) )
 			continue; // skip invisible
 
 		if( !state->solid )
@@ -684,14 +692,10 @@ static const char *GAME_EXPORT pfnTraceTexture( int ground, float *vstart, float
 
 static void GAME_EXPORT pfnPlaySound( int channel, const char *sample, float volume, float attenuation, int fFlags, int pitch )
 {
-	sound_t	snd;
-
 	if( !clgame.pmove->runfuncs )
 		return;
 
-	snd = S_RegisterSound( sample );
-
-	S_StartSound( NULL, clgame.pmove->player_index + 1, channel, snd, volume, attenuation, pitch, fFlags );
+	S_StartSound( NULL, clgame.pmove->player_index + 1, channel, S_RegisterSound( sample ), volume, attenuation, pitch, fFlags );
 }
 
 static void GAME_EXPORT pfnPlaybackEventFull( int flags, int clientindex, word eventindex, float delay, float *origin,
@@ -1068,6 +1072,24 @@ void CL_CheckPredictionError( void )
 
 /*
 ===========
+CL_CheckTeleport
+
+===========
+*/
+qboolean CL_CheckTeleport( vec3_t prevOrigin, vec3_t curOrigin )
+{
+	int i;
+	for( i = 0; i < 3; i++ )
+	{
+		if( fabs( prevOrigin[i] - curOrigin[i] ) >= 128.0f )
+			return true;
+	}
+
+	return false;
+}
+
+/*
+===========
 CL_PostRunCmd
 
 used while predicting is off but local weapons is on
@@ -1140,10 +1162,7 @@ void CL_PredictMovement( void )
 	if( cls.state != ca_active ) return;
 
 	if( cls.demoplayback && cl.refdef.cmd != NULL )
-	{
-		// restore viewangles from cmd.angles
-		VectorCopy( cl.refdef.cmd->viewangles, cl.refdef.cl_viewangles );
-	}
+		CL_DemoInterpolateAngles();
 
 	if( !CL_IsInGame( )) return;
 	
@@ -1154,11 +1173,16 @@ void CL_PredictMovement( void )
 
 	ASSERT( cl.refdef.cmd != NULL );
 
-	if( ( !cl_predict->integer || Host_IsLocalClient() )  && cl_lw->integer )
+	if( !CL_IsPredicted() )
 	{
 		// fake prediction code
 		// we need to perform cl_lw prediction while cl_predict is disabled
 		// because cl_lw is enabled by default in Half-Life
+		if( !cl_lw->integer )
+		{
+			cl.predicted.viewmodel = cl.frame.client.viewmodel;
+			return;
+		}
 
 		ack = cls.netchan.incoming_acknowledged;
 		outgoing_command = cls.netchan.outgoing_sequence;
@@ -1201,45 +1225,8 @@ void CL_PredictMovement( void )
 			frame++;
 		}
 
-
-		// keep cl.predicted.origin valid
-		VectorCopy( cl.frame.client.origin, cl.predicted.origin );
-		VectorCopy( cl.frame.client.velocity, cl.predicted.velocity );
-		VectorCopy( cl.frame.client.punchangle, cl.predicted.punchangle );
-		VectorCopy( cl.frame.client.view_ofs, cl.predicted.viewofs );
-		cl.predicted.viewmodel = cl.frame.client.viewmodel;
-		cl.predicted.usehull = from->playerstate.usehull;
-		cl.predicted.waterlevel = cl.frame.client.waterlevel;
-		cl.predicted.correction_time = 0;
-		cl.predicted.moving = 0;
-		cl.predicted.onground = -1;
-		return;
-	}
-
-	if( !CL_IsPredicted( ))
-	{
-		local_state_t	from = { 0 }, to = { 0 };
-
-		Q_memcpy( from.weapondata, cl.frame.weapondata, sizeof( from.weapondata ));
-		from.playerstate = cl.frame.playerstate[cl.playernum];
-		from.client = cl.frame.client;
-
-		to = from;
-
-		clgame.dllFuncs.pfnPostRunCmd( &from, &to, cl.refdef.cmd, !cl_predict->integer ? true : false, cl.time, cls.lastoutgoingcommand );
-
-		// fake unpredicted values
-		VectorCopy( to.client.origin, cl.predicted.origin );
-		VectorCopy( to.client.velocity, cl.predicted.velocity );
-		VectorCopy( to.client.punchangle, cl.predicted.punchangle );
-		VectorCopy( to.client.view_ofs, cl.predicted.viewofs );
-		cl.predicted.usehull = to.playerstate.usehull;
-		cl.predicted.waterlevel = to.client.waterlevel;
-		cl.predicted.viewmodel = to.client.viewmodel;
-		cl.predicted.correction_time = 0;
-		cl.predicted.moving = 0;
-		cl.predicted.onground = -1;
-
+		if( to )
+			cl.predicted.viewmodel = to->client.viewmodel;
 		return;
 	}
 
@@ -1289,17 +1276,19 @@ void CL_PredictMovement( void )
 		float t0 = cl.commands[( cl.parsecountmod + frame - 1) & CL_UPDATE_MASK].senttime,
 			  t1 = cl.commands[( cl.parsecountmod + frame ) & CL_UPDATE_MASK].senttime;
 		float t;
+
 		if( t0 == t1 )
+		{
 			t = 0.0f;
+		}
 		else
 		{
 			t = (host.realtime - t0) / (t1 - t0);
 			t = bound( 0.0f, t, 1.0f );
 		}
 
-		if( fabs(to->playerstate.origin[0] - from->playerstate.origin[0]) > 128.0f ||
-			fabs(to->playerstate.origin[1] - from->playerstate.origin[1]) > 128.0f ||
-			fabs(to->playerstate.origin[2] - from->playerstate.origin[2]) > 128.0f )
+		// was teleported
+		if( CL_CheckTeleport( to->playerstate.origin, from->playerstate.origin ) )
 		{
 			VectorCopy( to->playerstate.origin, cl.predicted.origin );
 			VectorCopy( to->client.velocity,    cl.predicted.velocity );
@@ -1309,6 +1298,7 @@ void CL_PredictMovement( void )
 		else
 		{
 			vec3_t delta_origin, delta_punch, delta_vel;
+
 			VectorSubtract( to->playerstate.origin, from->playerstate.origin, delta_origin );
 			VectorSubtract( to->client.velocity,    from->client.velocity,    delta_vel );
 			VectorSubtract( to->client.punchangle,  from->client.punchangle,  delta_punch );
@@ -1333,7 +1323,7 @@ void CL_PredictMovement( void )
 		cl.predicted.viewmodel  = to->client.viewmodel;
 		cl.predicted.usehull    = to->playerstate.usehull;
 
-		if( to->client.flags & FL_ONGROUND )
+		if( FBitSet( to->client.flags, FL_ONGROUND ) )
 		{
 			cl_entity_t *ent = CL_GetEntityByIndex( cl.predicted.lastground );
 			
@@ -1345,12 +1335,13 @@ void CL_PredictMovement( void )
 				vec3_t delta;
 				delta[0] = ent->curstate.origin[0] - ent->prevstate.origin[0];
 				delta[1] = ent->curstate.origin[1] - ent->prevstate.origin[1];
-				delta[2] = ent->curstate.origin[2] - ent->prevstate.origin[2];
+				// delta[2] = ent->curstate.origin[2] - ent->prevstate.origin[2];
+				delta[2] = 0.0f;
 
 				if( VectorLength( delta ) > 0.0f )
 				{
-					cl.predicted.moving = 1;
 					cl.predicted.correction_time = 0;
+					cl.predicted.moving = 1;
 				}
 			}
 		}
@@ -1360,20 +1351,23 @@ void CL_PredictMovement( void )
 			cl.predicted.moving = 0;
 		}
 
-		if ( cl.predicted.correction_time > 0.0 && !cl_nosmooth->value && cl_smoothtime->value )
+		if ( cl.predicted.correction_time > 0.0 && !cl_nosmooth->integer && cl_smoothtime->integer )
 		{
 			float d;
-			vec3_t delta;
+			int i;
 
 			if( cl_smoothtime->value <= 0 )
 				Cvar_SetFloat( "cl_smoothtime", 0.1 );
 
 			cl.predicted.correction_time = bound( 0, cl.predicted.correction_time - host.frametime, cl_smoothtime->value );
 
-			d = 1 - cl.predicted.correction_time / cl_smoothtime->value;
+			d = cl.predicted.correction_time / cl_smoothtime->value;
 
-			VectorSubtract( cl.predicted.origin, cl.predicted.lastorigin, delta );
-			VectorMA( cl.predicted.lastorigin, d, delta, cl.predicted.origin );
+			for( i = 0; i < 3; i++ )
+			{
+				cl.predicted.origin[i] = cl.predicted.lastorigin[i] + (cl.predicted.origin[i] - cl.predicted.lastorigin[i]) * (1.0f - d);
+			}
+
 		}
 		VectorCopy( cl.predicted.origin, cl.predicted.lastorigin );
 		CL_SetIdealPitch();

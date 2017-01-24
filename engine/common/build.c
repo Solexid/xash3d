@@ -149,5 +149,5 @@ IMPORTANT: this value must be acquired through "build" cvar.
 */
 int Q_buildnum_compat( void )
 {
-	return 3366;
+	return 3598;
 }

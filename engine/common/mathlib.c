@@ -512,29 +512,64 @@ AngleQuaternion
 
 ====================
 */
-void AngleQuaternion( const vec3_t angles, vec4_t q )
+void AngleQuaternion( const vec3_t angles, vec4_t q, qboolean studio )
 {
 	float	sr, sp, sy, cr, cp, cy;
 
 #ifdef VECTORIZE_SINCOS
-	SinCosFastVector( angles[2] * 0.5f, angles[1] * 0.5f, angles[0] * 0.5f, 0,
-					  &sy, &sp, &sr, NULL,
-					  &cy, &cp, &cr, NULL);
-#else
-	float	angle;
+	if( studio )
+	{
+		SinCosFastVector(
+			angles[ROLL] * 0.5f,
+			angles[YAW] * 0.5f,
+			angles[PITCH] * 0.5f,
+			0,
+			&sy, &sp, &sr, NULL,
+			&cy, &cp, &cr, NULL);
+	}
+	else
+	{
+		SinCosFastVector(
+			DEG2RAD(angles[YAW]) * 0.5f,
+			DEG2RAD(angles[PITCH]) * 0.5f,
+			DEG2RAD(angles[ROLL]) * 0.5f,
+			0,
+			&sy, &sp, &sr, NULL,
+			&cy, &cp, &cr, NULL);
 
-	angle = angles[2] * 0.5f;
-	SinCos( angle, &sy, &cy );
-	angle = angles[1] * 0.5f;
-	SinCos( angle, &sp, &cp );
-	angle = angles[0] * 0.5f;
-	SinCos( angle, &sr, &cr );
+	}
+#else
+	if( studio )
+	{
+		SinCos( angles[ROLL] * 0.5f, &sy, &cy );
+		SinCos( angles[YAW] * 0.5f, &sp, &cp );
+		SinCos( angles[PITCH] * 0.5f, &sr, &cr );
+	}
+	else
+	{
+		SinCos( DEG2RAD( angles[YAW] ) * 0.5f, &sy, &cy );
+		SinCos( DEG2RAD( angles[PITCH] ) * 0.5f, &sp, &cp );
+		SinCos( DEG2RAD( angles[ROLL] ) * 0.5f, &sr, &cr );
+	}
 #endif
 
 	q[0] = sr * cp * cy - cr * sp * sy; // X
 	q[1] = cr * sp * cy + sr * cp * sy; // Y
 	q[2] = cr * cp * sy - sr * sp * cy; // Z
 	q[3] = cr * cp * cy + sr * sp * sy; // W
+}
+
+/*
+====================
+QuaternionAngle
+
+====================
+*/
+void QuaternionAngle( const vec4_t q, vec3_t angles )
+{
+	matrix3x4	mat;
+	Matrix3x4_FromOriginQuat( mat, q, vec3_origin );
+	Matrix3x4_AnglesFromMatrix( mat, angles );
 }
 
 /*

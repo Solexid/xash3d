@@ -68,8 +68,14 @@ extern "C" {
 #define MAX_STRING		256	// generic string
 #define MAX_INFO_STRING	256	// infostrings are transmitted across network
 #define MAX_SYSPATH		PATH_MAX	// system filepath
+#define MAX_PRINT_MSG	8192 // how many symbols can handle single call of Msg or MsgDev
 #define MAX_MODS		512	// environment games that engine can keep visible
 #define BIT( n )		(1U << ( n ))
+#define GAMMA		( 2.2 )		// Valve Software gamma
+#define INVGAMMA		( 1.0 / 2.2 )	// back to 1.0
+#define SetBits( iBitVector, bits )	((iBitVector) = (iBitVector) | (bits))
+#define ClearBits( iBitVector, bits )	((iBitVector) = (iBitVector) & ~(bits))
+#define FBitSet( iBitVector, bit )	((iBitVector) & (bit))
 
 #ifndef __cplusplus
 #define NULL		((void *)0)
@@ -96,8 +102,8 @@ extern "C" {
 typedef unsigned int	dword;
 typedef unsigned int	uint;
 typedef char		string[MAX_STRING];
+typedef off_t	fs_offset_t;
 typedef struct searchpath_s searchpath_t;
-typedef off_t		fs_offset_t;
 typedef struct file_s	file_t;		// normal file
 typedef struct wfile_s	wfile_t;		// wad file
 typedef struct stream_s	stream_t;		// sound stream for background music playing
@@ -113,8 +119,8 @@ enum
 {
 	D_INFO = 1,	// "-dev 1", shows various system messages
 	D_WARN,		// "-dev 2", shows not critical system warnings
-	D_ERROR,		// "-dev 3", shows critical warnings 
-	D_AICONSOLE,	// "-dev 4", special case for game aiconsole
+	D_ERROR,	// "-dev 3", shows critical warnings
+	D_REPORT,	// "-dev 4", special case for game reports
 	D_NOTE		// "-dev 5", show system notifications for engine developers
 };
 
@@ -141,11 +147,19 @@ typedef enum
 #define BASED_VERSION	0.98f
 
 // PERFORMANCE INFO
-#define MIN_FPS         	15.0		// host minimum fps value for maxfps.
+#define MIN_FPS         	20.0		// host minimum fps value for maxfps.
 #define MAX_FPS         	500.0		// upper limit for maxfps.
 
 #define MAX_FRAMETIME	0.1
 #define MIN_FRAMETIME	0.000001
+
+// HOST_FIXED_FRAMERATE stuff
+#define HOST_MINFPS		20.0
+#define HOST_MAXFPS		72.0
+#define GAME_FPS		20.0
+#define HOST_FPS		60.0		// client and the server clamped at 60.0 fps max. Render clamped at fps_max cvar
+#define HOST_FRAMETIME	( 1.0 / HOST_FPS )
+
 
 #define MAX_CMD_TOKENS	80		// cmd tokens
 #define MAX_ENTNUMBER	99999		// for server and client parsing
@@ -189,6 +203,7 @@ extern convar_t	*scr_width;
 extern convar_t	*scr_height;
 extern convar_t	*scr_loading;
 extern convar_t	*scr_download;
+extern convar_t *cmd_scripting;
 extern convar_t	*cl_allow_levelshots;
 extern convar_t	*mod_allow_materials;
 extern convar_t	*host_limitlocal;
@@ -278,7 +293,6 @@ typedef enum
 	HOST_ERR_FATAL,	// sys error
 	HOST_SLEEP,	// sleeped by different reason, e.g. minimize window
 	HOST_NOFOCUS,	// same as HOST_FRAME, but disable mouse
-	HOST_RESTART,	// during the changes video mode
 	HOST_CRASHED	// an exception handler called
 } host_state;
 
@@ -333,6 +347,11 @@ typedef struct host_redirect_s
 	int lines;
 } host_redirect_t;
 
+// local flags (never sending acorss the net)
+#define SND_LOCALSOUND	(1<<9)	// not paused, not looped, for internal use
+#define SND_STOP_LOOPING	(1<<10)	// stop all looping sounds on the entity.
+#define SND_FILTER_CLIENT	(1<<11)	// don't send sound from local player if prediction was enabled
+
 typedef struct
 {
 	char		name[64];
@@ -382,6 +401,7 @@ typedef struct host_parm_s
 	qboolean		key_overstrike;	// key overstrike mode
 	qboolean		stuffcmdsrun;	// execute stuff commands
 	qboolean		con_showalways;	// show console always (developer and dedicated)
+	qboolean		com_handlecolon;// allow COM_ParseFile is handle colon as single character
 	qboolean		change_game;	// initialize when game is changed
 	qboolean		mouse_visible;	// vgui override cursor control
 	qboolean		input_enabled;	// vgui override mouse & keyboard input
@@ -407,8 +427,6 @@ typedef struct host_parm_s
 	struct decallist_s	*decalList;	// used for keep decals, when renderer is restarted or changed
 	int		numdecals;
 
-	soundlist_t	*soundList;	// used for keep ambient sounds, when renderer or sound is restarted
-	int		numsounds;
 	qboolean enabledll;
 	qboolean textmode;
 } host_parm_t;
@@ -437,40 +455,42 @@ void FS_DefaultExtension( char *path, const char *extension );
 void FS_ExtractFilePath( const char *path, char* dest );
 const char *FS_GetDiskPath( const char *name, qboolean gamedironly );
 const char *FS_FileWithoutPath( const char *in );
-wfile_t *W_Open( const char *filename, const char *mode );
+wfile_t *W_Open( const char *filename, const char *mode, int *errorcode );
 byte *W_LoadLump( wfile_t *wad, const char *lumpname, size_t *lumpsizeptr, const char type );
 void W_Close( wfile_t *wad );
 searchpath_t *FS_FindFile( const char *name, int *index, qboolean gamedironly );
-file_t *FS_OpenFile( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly );
-byte *FS_LoadFile( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly );
-qboolean FS_WriteFile( const char *filename, const void *data, fs_offset_t len );
+file_t *FS_OpenFile( const char *path, long *filesizeptr, qboolean gamedironly );
+byte *FS_LoadFile( const char *path, long *filesizeptr, qboolean gamedironly );
+qboolean FS_WriteFile( const char *filename, const void *data, long len );
+qboolean COM_ParseVector( char **pfile, float *v, size_t size );
+void COM_NormalizeAngles( vec3_t angles );
 int COM_FileSize( const char *filename );
 void COM_FixSlashes( char *pname );
 void COM_FreeFile( void *buffer );
 int COM_CompareFileTime( const char *filename1, const char *filename2, int *iCompare );
 search_t *FS_Search( const char *pattern, int caseinsensitive, int gamedironly );
 file_t *FS_Open( const char *filepath, const char *mode, qboolean gamedironly );
-fs_offset_t FS_Write( file_t *file, const void *data, size_t datasize );
-fs_offset_t FS_Read( file_t *file, void *buffer, size_t buffersize );
+long FS_Write( file_t *file, const void *data, size_t datasize );
+long FS_Read( file_t *file, void *buffer, size_t buffersize );
 int FS_VPrintf( file_t *file, const char *format, va_list ap );
 int FS_Seek( file_t *file, fs_offset_t offset, int whence );
 int FS_Printf( file_t *file, const char *format, ... ) _format(2);
-fs_offset_t FS_FileSize( const char *filename, qboolean gamedironly );
-fs_offset_t FS_FileTime( const char *filename, qboolean gamedironly );
+long FS_FileSize( const char *filename, qboolean gamedironly );
+long FS_FileTime( const char *filename, qboolean gamedironly );
 int FS_Print( file_t *file, const char *msg );
 qboolean FS_Rename( const char *oldname, const char *newname );
 qboolean FS_FileExists( const char *filename, qboolean gamedironly );
-void FS_FileCopy( file_t *pOutput, file_t *pInput, int fileSize );
+qboolean FS_FileCopy( file_t *pOutput, file_t *pInput, int fileSize );
 qboolean FS_Delete( const char *path );
 int FS_UnGetc( file_t *file, byte c );
 void FS_StripExtension( char *path );
-fs_offset_t FS_Tell( file_t *file );
+long FS_Tell( file_t *file );
 qboolean FS_Eof( file_t *file );
 void FS_Purge( file_t *file );
 int FS_Close( file_t *file );
 int FS_Getc( file_t *file );
 qboolean FS_Eof( file_t *file );
-fs_offset_t FS_FileLength( file_t *f );
+long FS_FileLength( file_t *f );
 void FS_Rescan( void );
 
 //
@@ -497,6 +517,7 @@ typically expanded to rgba buffer
 NOTE: number at end of pixelformat name it's a total bitscount e.g. PF_RGB_24 == PF_RGB_888
 ========================================================================
 */
+#define ImageRAW( type ) (type == PF_RGBA_32 || type == PF_BGRA_32 || type == PF_RGB_24 || type == PF_BGR_24)
 #define ImageDXT( type ) (type == PF_DXT1 || type == PF_DXT3 || type == PF_DXT5)
 
 typedef enum
@@ -508,8 +529,8 @@ typedef enum
 	PF_BGRA_32,	// big endian RGBA (MacOS)
 	PF_RGB_24,	// uncompressed dds or another 24-bit image 
 	PF_BGR_24,	// big-endian RGB (MacOS)
-	PF_DXT1, // nvidia DXT1 format
-	PF_DXT3, // nvidia DXT3 format
+	PF_DXT1, // s3tc DXT1 format
+	PF_DXT3, // s3tc DXT3 format
 	PF_DXT5, // nvidia DXT5 format
 	PF_TOTALCOUNT,	// must be last
 } pixformat_t;
@@ -556,6 +577,7 @@ typedef enum
 	IMAGE_SKYBOX	= BIT(5),		// only used by FS_SaveImage - for write right suffixes
 	IMAGE_QUAKESKY	= BIT(6),		// it's a quake sky double layered clouds (so keep it as 8 bit)
 	IMAGE_DDS_FORMAT = BIT(7), // a hint for GL loader
+	IMAGE_MULTILAYER = BIT(8), // to differentiate from 3D texture
 
 	// Image_Process manipulation flags
 	IMAGE_FLIP_X	= BIT(16),	// flip the image by width
@@ -763,15 +785,17 @@ qboolean SV_Active( void );
 
 ==============================================================
 */
-cvar_t *pfnCvar_RegisterVariable( const char *szName, const char *szValue, int flags );
+cvar_t *pfnCvar_RegisterClientVariable( const char *szName, const char *szValue, int flags );
+cvar_t *pfnCvar_RegisterGameUIVariable( const char *szName, const char *szValue, int flags );
 char *COM_MemFgets( byte *pMemFile, int fileSize, int *filePos, char *pBuffer, int bufferSize );
+int COM_SaveFile( const char *filename, const void *data, long len );
 byte* COM_LoadFileForMe( const char *filename, int *pLength );
 cvar_t *pfnCVarGetPointer( const char *szVarName );
 int pfnDrawConsoleString( int x, int y, char *string );
 void pfnDrawSetTextColor( float r, float g, float b );
 void pfnDrawConsoleStringLen( const char *pText, int *length, int *height );
-int pfnAddClientCommand( const char *cmd_name, xcommand_t func );
 void *Cache_Check( byte *mempool, struct cache_user_s *c );
+void COM_TrimSpace( const char *source, char *dest );
 edict_t* pfnPEntityOfEntIndex( int iEntIndex );
 void pfnGetModelBounds( model_t *mod, float *mins, float *maxs );
 void pfnGetGameDir( char *szGetGameDir );
@@ -858,7 +882,7 @@ long AVI_GetVideoFrameNumber( movie_state_t *Avi, float time );
 byte *AVI_GetVideoFrame( movie_state_t *Avi, long frame );
 qboolean AVI_GetVideoInfo( movie_state_t *Avi, long *xres, long *yres, float *duration );
 qboolean AVI_GetAudioInfo( movie_state_t *Avi, wavdata_t *snd_info );
-fs_offset_t AVI_GetAudioChunk( movie_state_t *Avi, char *audiodata, long offset, long length );
+long AVI_GetAudioChunk( movie_state_t *Avi, char *audiodata, long offset, long length );
 void AVI_OpenVideo( movie_state_t *Avi, const char *filename, qboolean load_audio, qboolean ignore_hwgamma, int quiet );
 movie_state_t *AVI_LoadVideo( const char *filename, qboolean load_audio, qboolean ignore_hwgamma );
 movie_state_t *AVI_LoadVideoNoSound( const char *filename, qboolean ignore_hwgamma );
@@ -907,7 +931,7 @@ void COM_AddAppDirectoryToSearchPath( const char *pszBaseDir, const char *appNam
 int COM_ExpandFilename( const char *fileName, char *nameOutBuffer, int nameOutBufferSize );
 struct pmtrace_s *PM_TraceLine( float *start, float *end, int flags, int usehull, int ignore_pe );
 void SV_StartSound( edict_t *ent, int chan, const char *sample, float vol, float attn, int flags, int pitch );
-void SV_StartMusic( const char *curtrack, const char *looptrack, fs_offset_t position );
+void SV_StartMusic( const char *curtrack, const char *looptrack, long position );
 void SV_CreateDecal( struct sizebuf_s *msg, const float *origin, int decalIndex, int entityIndex, int modelIndex, int flags, float scale );
 void SV_CreateStudioDecal( struct sizebuf_s *msg, const float *origin, const float *start, int decalIndex, int entityIndex, int modelIndex, int flags, struct modelstate_s *state );
 struct sizebuf_s *SV_GetReliableDatagram( void );

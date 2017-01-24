@@ -22,6 +22,7 @@ GNU General Public License for more details.
 #include "gl_local.h"
 #include "engine_features.h"
 #include "client.h"
+#include "server.h"	// LUMP_ error codes
 
 #define MAX_SIDE_VERTS		512	// per one polygon
 
@@ -160,6 +161,7 @@ void Mod_PrintBSPFileSizes_f( void )
 
 	Msg( "=== Total BSP file data space used: %s ===\n", Q_memprint( totalmemory ));
 	Msg( "World size ( %g %g %g ) units\n", world.size[0], world.size[1], world.size[2] );
+	Msg( "Supports transparency world water: %s\n", world.water_alpha ? "Yes" : "No" );
 	Msg( "Original name: ^1%s\n", worldmodel->name );
 	Msg( "Internal name: %s\n", (world.message[0]) ? va( "^2%s", world.message ) : "none" );
 }
@@ -204,94 +206,50 @@ void Mod_SetupHulls( vec3_t mins[MAX_MAP_HULLS], vec3_t maxs[MAX_MAP_HULLS] )
 
 /*
 ===================
-Mod_CompressVis
-===================
-*/
-byte *Mod_CompressVis( const byte *in, size_t *size )
-{
-	int	j, rep;
-	int	visrow;
-	byte	*dest_p;
-
-	if( !worldmodel )
-	{
-		Host_MapDesignError( "Mod_CompressVis: no worldmodel\n" );
-		return NULL;
-	}
-	
-	dest_p = visdata;
-	visrow = (worldmodel->numleafs + 7) >> 3;
-	
-	for( j = 0; j < visrow; j++ )
-	{
-		*dest_p++ = in[j];
-		if( in[j] ) continue;
-
-		rep = 1;
-		for( j++; j < visrow; j++ )
-		{
-			if( in[j] || rep == 255 )
-				break;
-			else rep++;
-		}
-		*dest_p++ = rep;
-		j--;
-	}
-
-	if( size ) *size = dest_p - visdata;
-
-	return visdata;
-}
-
-/*
-===================
 Mod_DecompressVis
 ===================
 */
-byte *Mod_DecompressVis( const byte *in )
+static void Mod_DecompressVis( const byte *in, const byte *inend, byte *out, byte *outend )
 {
-	int	c, row;
-	byte	*out;
+	byte	*outstart = out;
+	int	c;
 
-	if( !worldmodel )
+	while( out < outend )
 	{
-		Host_MapDesignError( "Mod_DecompressVis: no worldmodel\n" );
-		return NULL;
+		if( in == inend )
+		{
+			MsgDev( D_WARN, "Mod_DecompressVis: input underrun (decompressed %i of %i output bytes)\n",
+			(int)(out - outstart), (int)(outend - outstart));
+			return;
+		}
+
+		c = *in++;
+
+		if( c )
+		{
+			*out++ = c;
+		}
+		else
+		{
+			if( in == inend )
+			{
+				MsgDev( D_REPORT, "Mod_DecompressVis: input underrun (during zero-run) (decompressed %i of %i output bytes)\n",
+				(int)(out - outstart), (int)(outend - outstart));
+				return;
+			}
+
+			for( c = *in++; c > 0; c-- )
+			{
+				if( out == outend )
+				{
+					MsgDev( D_REPORT, "Mod_DecompressVis: output overrun (decompressed %i of %i output bytes)\n",
+					(int)(out - outstart), (int)(outend - outstart));
+					return;
+				}
+				*out++ = 0;
+			}
+		}
 	}
-
-	row = (worldmodel->numleafs + 7) >> 3;	
-	out = visdata;
-
-	if( !in )
-	{	
-		// no vis info, so make all visible
-		while( row )
-		{
-			*out++ = 0xff;
-			row--;
-		}
-		return visdata;
-	}
-
-	do
-	{
-		if( *in )
-		{
-			*out++ = *in++;
-			continue;
-		}
-
-		c = in[1];
-		in += 2;
-
-		while( c )
-		{
-			*out++ = 0;
-			c--;
-		}
-	} while( out - visdata < row );
-
-	return visdata;
 }
 
 /*
@@ -317,42 +275,99 @@ mleaf_t *Mod_PointInLeaf( const vec3_t p, mnode_t *node )
 
 /*
 ==================
-Mod_LeafPVS
+Mod_GetPVSForPoint
 
 ==================
 */
-byte *Mod_LeafPVS( mleaf_t *leaf, model_t *model )
+byte *Mod_GetPVSForPoint( const vec3_t p )
 {
-	if( !model || !leaf || leaf == model->leafs || !model->visdata )
-		return Mod_DecompressVis( NULL );
-	return Mod_DecompressVis( leaf->compressed_vis );
+	mnode_t	*node;
+	mleaf_t	*leaf = NULL;
+
+	ASSERT( worldmodel != NULL );
+
+	node = worldmodel->nodes;
+
+	while( 1 )
+	{
+		if( node->contents < 0 )
+		{
+			leaf = (mleaf_t *)node;
+			break; // we found a leaf
+		}
+		node = node->children[PlaneDiff( p, node->plane ) < 0];
+	}
+
+	if( leaf && leaf->cluster >= 0 )
+		return world.visdata + leaf->cluster * world.visbytes;
+	return NULL;
 }
 
 /*
 ==================
-Mod_LeafPHS
+Mod_FatPVS_RecursiveBSPNode
 
 ==================
 */
-byte *Mod_LeafPHS( mleaf_t *leaf, model_t *model )
+static void Mod_FatPVS_RecursiveBSPNode( const vec3_t org, float radius, byte *visbuffer, int visbytes, mnode_t *node )
 {
-	if( !model || !leaf || leaf == model->leafs || !model->visdata )
-		return Mod_DecompressVis( NULL );
-	return Mod_DecompressVis( leaf->compressed_pas );
+	int	i;
+
+	while( node->contents >= 0 )
+	{
+		float d = PlaneDiff( org, node->plane );
+
+		if( d > radius )
+			node = node->children[0];
+		else if( d < -radius )
+			node = node->children[1];
+		else
+		{
+			// go down both sides
+			Mod_FatPVS_RecursiveBSPNode( org, radius, visbuffer, visbytes, node->children[0] );
+			node = node->children[1];
+		}
+	}
+
+	// if this leaf is in a cluster, accumulate the vis bits
+	if(((mleaf_t *)node)->cluster >= 0 )
+	{
+		byte	*vis = world.visdata + ((mleaf_t *)node)->cluster * world.visbytes;
+
+		for( i = 0; i < visbytes; i++ )
+			visbuffer[i] |= vis[i];
+	}
 }
 
 /*
 ==================
-Mod_PointLeafnum
+Mod_FatPVS_RecursiveBSPNode
 
+Calculates a PVS that is the inclusive or of all leafs
+within radius pixels of the given point.
 ==================
 */
-int Mod_PointLeafnum( const vec3_t p )
+int Mod_FatPVS( const vec3_t org, float radius, byte *visbuffer, int visbytes, qboolean merge, qboolean fullvis )
 {
-	// map not loaded
-	if ( !worldmodel ) return 0;
-	return Mod_PointInLeaf( p, worldmodel->nodes ) - worldmodel->leafs;
+	mleaf_t	*leaf = Mod_PointInLeaf( org, worldmodel->nodes );
+	int	bytes = world.visbytes;
+
+	bytes = Q_min( bytes, visbytes );
+
+	// enable full visibility for some reasons
+	if( fullvis || !world.visclusters || !leaf || leaf->cluster < 0 )
+	{
+		Q_memset( visbuffer, 0xFF, bytes );
+		return bytes;
+	}
+
+	if( !merge ) memset( visbuffer, 0x00, bytes );
+
+	Mod_FatPVS_RecursiveBSPNode( org, radius, visbuffer, bytes, worldmodel->nodes );
+
+	return bytes;
 }
+
 
 /*
 ======================================================================
@@ -363,8 +378,7 @@ LEAF LISTING
 */
 static void Mod_BoxLeafnums_r( leaflist_t *ll, mnode_t *node )
 {
-	mplane_t	*plane;
-	int	s;
+	int	sides;
 
 	while( 1 )
 	{
@@ -382,18 +396,17 @@ static void Mod_BoxLeafnums_r( leaflist_t *ll, mnode_t *node )
 				return;
 			}
 
-			ll->list[ll->count++] = leaf - worldmodel->leafs - 1;
+			ll->list[ll->count++] = leaf->cluster;
 			return;
 		}
-	
-		plane = node->plane;
-		s = BOX_ON_PLANE_SIDE( ll->mins, ll->maxs, plane );
 
-		if( s == 1 )
+		sides = BOX_ON_PLANE_SIDE( ll->mins, ll->maxs, node->plane );
+
+		if( sides == 1 )
 		{
 			node = node->children[0];
 		}
-		else if( s == 2 )
+		else if( sides == 2 )
 		{
 			node = node->children[1];
 		}
@@ -421,11 +434,12 @@ int Mod_BoxLeafnums( const vec3_t mins, const vec3_t maxs, short *list, int list
 
 	VectorCopy( mins, ll.mins );
 	VectorCopy( maxs, ll.maxs );
-	ll.count = 0;
+
 	ll.maxcount = listsize;
-	ll.list = list;
-	ll.topnode = -1;
 	ll.overflowed = false;
+	ll.topnode = -1;
+	ll.list = list;
+	ll.count = 0;
 
 	Mod_BoxLeafnums_r( &ll, worldmodel->nodes );
 
@@ -453,11 +467,38 @@ qboolean Mod_BoxVisible( const vec3_t mins, const vec3_t maxs, const byte *visbi
 
 	for( i = 0; i < count; i++ )
 	{
-		int	leafnum = leafList[i];
-
-		if( leafnum != -1 && visbits[leafnum>>3] & (1<<( leafnum & 7 )))
+		if( CHECKVISBIT( visbits, leafList[i] ))
 			return true;
 	}
+	return false;
+}
+
+/*
+=============
+Mod_HeadnodeVisible
+=============
+*/
+qboolean Mod_HeadnodeVisible( mnode_t *node, const byte *visbits, short *lastleaf )
+{
+	if( !node || node->contents == CONTENTS_SOLID )
+		return false;
+
+	if( node->contents < 0 )
+	{
+		if( !CHECKVISBIT( visbits, ((mleaf_t *)node)->cluster ))
+			return false;
+
+		if( lastleaf )
+			*lastleaf = ((mleaf_t *)node)->cluster;
+		return true;
+	}
+
+	if( Mod_HeadnodeVisible( node->children[0], visbits, lastleaf ))
+		return true;
+
+	if( Mod_HeadnodeVisible( node->children[1], visbits, lastleaf ))
+		return true;
+
 	return false;
 }
 
@@ -480,6 +521,57 @@ void Mod_AmbientLevels( const vec3_t p, byte *pvolumes )
 }
 
 /*
+==================
+Mod_SampleSizeForFace
+
+return the current lightmap resolution per face
+==================
+*/
+int Mod_SampleSizeForFace( msurface_t *surf )
+{
+	if( !surf || !surf->texinfo || !surf->texinfo->faceinfo )
+		return LM_SAMPLE_SIZE;
+
+	return surf->texinfo->faceinfo->texture_step;
+}
+
+/*
+==================
+Mod_CheckWaterAlphaSupport
+
+converted maps potential may don't
+support water transparency
+==================
+*/
+static qboolean Mod_CheckWaterAlphaSupport( void )
+{
+	mleaf_t		*leaf;
+	int		i, j;
+	const byte	*pvs;
+
+	if( world.visdatasize <= 0 ) return true;
+
+	// check all liquid leafs to see if they can see into empty leafs, if any
+	// can we can assume this map supports r_wateralpha
+	for( i = 0, leaf = loadmodel->leafs; i < loadmodel->numleafs; i++, leaf++ )
+	{
+		if(( leaf->contents == CONTENTS_WATER || leaf->contents == CONTENTS_SLIME ) && leaf->cluster >= 0 )
+		{
+			pvs = world.visdata + leaf->cluster * world.visbytes;
+
+			for( j = 0; j < loadmodel->numleafs; j++ )
+			{
+				if( CHECKVISBIT( pvs, loadmodel->leafs[j].cluster ) && loadmodel->leafs[j].contents == CONTENTS_EMPTY )
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+
+/*
 ================
 Mod_FreeUserData
 ================
@@ -489,8 +581,16 @@ static void Mod_FreeUserData( model_t *mod )
 	// already freed?
 	if( !mod || !mod->name[0] )
 		return;
+	if( host.type == HOST_DEDICATED )
+	{
+		if( svgame.physFuncs.Mod_ProcessUserData )
+		{
+			// let the server.dll free custom data
+			svgame.physFuncs.Mod_ProcessUserData( mod, false, NULL );
+		}
+	}
 #ifndef XASH_DEDICATED
-	if( clgame.drawFuncs.Mod_ProcessUserData != NULL )
+	else if( clgame.drawFuncs.Mod_ProcessUserData != NULL )
 	{
 		// let the client.dll free custom data
 		clgame.drawFuncs.Mod_ProcessUserData( mod, false, NULL );
@@ -630,7 +730,7 @@ static void Mod_LoadSubmodels( const dlump_t *l )
 	{
 		for( j = 0; j < 3; j++ )
 		{
-			// spread the mins / maxs by a pixel
+			// spread the mins / maxs by a unit
 			out->mins[j] = in->mins[j] - 1.0f;
 			out->maxs[j] = in->maxs[j] + 1.0f;
 			out->origin[j] = in->origin[j];
@@ -652,7 +752,7 @@ static void Mod_LoadSubmodels( const dlump_t *l )
 			VectorAverage( out->mins, out->maxs, out->origin );
 		}
 
-		world.max_surfaces = max( world.max_surfaces, out->numfaces ); 
+		world.max_surfaces = Q_max( world.max_surfaces, out->numfaces );
 	}
 
 	if( world.loading )
@@ -687,6 +787,7 @@ static void Mod_LoadTextures( const dlump_t *l )
 		tr.solidskyTexture = tr.alphaskyTexture = 0;
 #endif
 		world.texdatasize = l->filelen;
+		world.custom_skybox = false;
 		world.has_mirrors = false;
 		world.sky_sphere = false;
 	}
@@ -764,7 +865,6 @@ static void Mod_LoadTextures( const dlump_t *l )
 				if( load_external )
 				{
 					tr.solidskyTexture = GL_LoadTexture( texname, NULL, 0, TF_UNCOMPRESSED|TF_NOMIPMAP, NULL );
-					GL_SetTextureType( tr.solidskyTexture, TEX_BRUSH );
 					load_external = false;
 				}
 
@@ -786,17 +886,8 @@ static void Mod_LoadTextures( const dlump_t *l )
 					if( load_external )
 					{
 						tr.alphaskyTexture = GL_LoadTexture( texname, NULL, 0, TF_UNCOMPRESSED|TF_NOMIPMAP, NULL );
-						GL_SetTextureType( tr.alphaskyTexture, TEX_BRUSH );
 						load_external = false;
 					}
-				}
-
-				if( !tr.solidskyTexture || !tr.alphaskyTexture )
-				{
-					// couldn't find one of layer
-					GL_FreeTexture( tr.solidskyTexture );
-					GL_FreeTexture( tr.alphaskyTexture );
-					tr.solidskyTexture = tr.alphaskyTexture = 0;
 				}
 			}
 
@@ -938,13 +1029,6 @@ static void Mod_LoadTextures( const dlump_t *l )
 				} 
 			}
 		}
-
-		if( tx->gl_texturenum != tr.defaultTexture )
-		{
-			// apply texture type (just for debug)
-			GL_SetTextureType( tx->gl_texturenum, TEX_BRUSH );
-			GL_SetTextureType( tx->fb_texturenum, TEX_BRUSH );
-		}
 #endif
 	}
 
@@ -953,11 +1037,11 @@ static void Mod_LoadTextures( const dlump_t *l )
 	{
 		tx = loadmodel->textures[i];
 
-		if( !tx || tx->name[0] != '+' )
+		if( tx->name[0] != '+' || tx->name[1] == 0 || tx->name[2] == 0 )
 			continue;
 
 		if( tx->anim_next )
-			continue;	// allready sequenced
+			continue;	// already sequenced
 
 		// find the number of frames in the animation
 		Q_memset( anims, 0, sizeof( anims ));
@@ -982,16 +1066,14 @@ static void Mod_LoadTextures( const dlump_t *l )
 		}
 		else 
 		{
-			Host_MapDesignError( "Mod_LoadTextures: bad animating texture %s\n", tx->name );
+			MsgDev( D_ERROR, "Mod_LoadTextures: bad animating texture %s\n", tx->name );
 		}
 
 		for( j = i + 1; j < loadmodel->numtextures; j++ )
 		{
 			tx2 = loadmodel->textures[j];
-			if( !tx2 || tx2->name[0] != '+' )
-				continue;
 
-			if( Q_strcmp( tx2->name + 2, tx->name + 2 ))
+			if( tx2->name[0] != '+' || Q_strcmp( tx2->name + 2, tx->name + 2 ))
 				continue;
 
 			num = tx2->name[1];
@@ -999,7 +1081,7 @@ static void Mod_LoadTextures( const dlump_t *l )
 			{
 				num -= '0';
 				anims[num] = tx2;
-				if (num+1 > max)
+				if( num + 1 > max )
 					max = num + 1;
 			}
 			else if( num >= 'a' && num <= 'j' )
@@ -1009,7 +1091,7 @@ static void Mod_LoadTextures( const dlump_t *l )
 				if( num + 1 > altmax )
 					altmax = num + 1;
 			}
-			else Host_MapDesignError( "Mod_LoadTextures: bad animating texture %s\n", tx->name );
+			else MsgDev( D_ERROR, "Mod_LoadTextures: bad animating texture %s\n", tx->name );
 		}
 
 		// link them all together
@@ -1018,7 +1100,8 @@ static void Mod_LoadTextures( const dlump_t *l )
 			tx2 = anims[j];
 			if( !tx2 )
 			{
-				Host_MapDesignError( "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
+				MsgDev( D_ERROR, "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
+				tx->anim_total = 0;
 				continue;
 			}
 			tx2->anim_total = max * ANIM_CYCLE;
@@ -1033,7 +1116,8 @@ static void Mod_LoadTextures( const dlump_t *l )
 			tx2 = altanims[j];
 			if( !tx2 )
 			{
-				Host_MapDesignError( "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
+				MsgDev( D_ERROR, "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
+				tx->anim_total = 0;
 				continue;
 			}
 			tx2->anim_total = altmax * ANIM_CYCLE;
@@ -1049,11 +1133,11 @@ static void Mod_LoadTextures( const dlump_t *l )
 	{
 		tx = loadmodel->textures[i];
 
-		if( !tx || tx->name[0] != '-' )
+		if( tx->name[0] != '-' || tx->name[1] == 0 || tx->name[2] == 0 )
 			continue;
 
 		if( tx->anim_next )
-			continue;	// allready sequenced
+			continue;	// already sequenced
 
 		// find the number of frames in the sequence
 		Q_memset( anims, 0, sizeof( anims ));
@@ -1068,16 +1152,13 @@ static void Mod_LoadTextures( const dlump_t *l )
 		}
 		else
 		{
-			Host_MapDesignError( "Mod_LoadTextures: bad detail texture %s\n", tx->name );
+			MsgDev( D_ERROR, "Mod_LoadTextures: bad detail texture %s\n", tx->name );
 		}
 
 		for( j = i + 1; j < loadmodel->numtextures; j++ )
 		{
 			tx2 = loadmodel->textures[j];
-			if( !tx2 || tx2->name[0] != '-' )
-				continue;
-
-			if( Q_strcmp( tx2->name + 2, tx->name + 2 ))
+			if( !tx2->name[0] != '-' || Q_strcmp( tx2->name + 2, tx->name + 2 ))
 				continue;
 
 			num = tx2->name[1];
@@ -1088,7 +1169,7 @@ static void Mod_LoadTextures( const dlump_t *l )
 				if( num+1 > max )
 					max = num + 1;
 			}
-			else Host_MapDesignError( "Mod_LoadTextures: bad detail texture %s\n", tx->name );
+			else MsgDev( D_ERROR, "Mod_LoadTextures: bad detail texture %s\n", tx->name );
 		}
 
 		// link them all together
@@ -1097,7 +1178,8 @@ static void Mod_LoadTextures( const dlump_t *l )
 			tx2 = anims[j];
 			if( !tx2 ) 
 			{
-				Host_MapDesignError( "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
+				MsgDev( D_ERROR, "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
+				tx->anim_total = 0;
 				continue;
 			}
 			tx2->anim_total = -( max * ANIM_CYCLE ); // to differentiate from animations
@@ -1110,44 +1192,66 @@ static void Mod_LoadTextures( const dlump_t *l )
 
 /*
 =================
+Mod_LoadFaceInfo
+=================
+*/
+static mfaceinfo_t *Mod_LoadFaceInfo( const dlump_t *l, int *numfaceinfo )
+{
+	dfaceinfo_t	*in;
+	mfaceinfo_t	*out, *faceinfo;
+	int		i, count;
+
+	in = (void *)(mod_base + l->fileofs);
+	if( l->filelen % sizeof( *in ))
+		Host_Error( "Mod_LoadFaceInfo: funny lump size in %s\n", loadmodel->name );
+
+	count = l->filelen / sizeof( *in );
+		  faceinfo = out = Mem_Alloc( loadmodel->mempool, count * sizeof( *out ));
+
+	for( i = 0; i < count; i++, in++, out++ )
+	{
+		Q_strncpy( out->landname, in->landname, sizeof( out->landname ));
+		out->texture_step = in->texture_step;
+		out->max_extent = in->max_extent;
+		out->groupid = in->groupid;
+	}
+
+	*numfaceinfo = count;
+
+	return faceinfo;
+}
+
+/*
+=================
 Mod_LoadTexInfo
 =================
 */
-static void Mod_LoadTexInfo( const dlump_t *l )
+static void Mod_LoadTexInfo( const dlump_t *l, dextrahdr_t *extrahdr )
 {
 	dtexinfo_t	*in;
 	mtexinfo_t	*out;
 	int		miptex;
+	mfaceinfo_t	*fi = NULL;
+	int		fi_count;
 	int		i, j, count;
-	float		len1, len2;
+
+	if( extrahdr != NULL )
+		fi = Mod_LoadFaceInfo( &extrahdr->lumps[LUMP_FACEINFO], &fi_count );
 
 	in = (void *)(mod_base + l->fileofs);
 	if( l->filelen % sizeof( *in ))
 		Host_Error( "Mod_LoadTexInfo: funny lump size in %s\n", loadmodel->name );
 
 	count = l->filelen / sizeof( *in );
-          out = Mem_Alloc( loadmodel->mempool, count * sizeof( *out ));
-	
+		  out = Mem_Alloc( loadmodel->mempool, count * sizeof( *out ));
+
 	loadmodel->texinfo = out;
 	loadmodel->numtexinfo = count;
 
 	for( i = 0; i < count; i++, in++, out++ )
 	{
-		for( j = 0; j < 4; j++ )
-		{
+		for( j = 0; j < 8; j++ )
 			out->vecs[0][j] = in->vecs[0][j];
-			out->vecs[1][j] = in->vecs[1][j];
-		}
-
-		len1 = VectorLength( out->vecs[0] );
-		len2 = VectorLength( out->vecs[1] );
-		len1 = ( len1 + len2 ) / 2;
-
-		// g-cont: can use this info for GL_TEXTURE_LOAD_BIAS_EXT ?
-		if( len1 < 0.32f ) out->mipadjust = 4;
-		else if( len1 < 0.49f ) out->mipadjust = 3;
-		else if( len1 < 0.99f ) out->mipadjust = 2;
-		else out->mipadjust = 1;
 
 		miptex = in->miptex;
 		if( miptex < 0 || miptex > loadmodel->numtextures )
@@ -1155,6 +1259,10 @@ static void Mod_LoadTexInfo( const dlump_t *l )
 
 		out->texture = loadmodel->textures[miptex];
 		out->flags = in->flags;
+
+		// make sure what faceinfo is really exist
+		if( extrahdr != NULL && in->faceinfo != -1 && in->faceinfo < fi_count )
+			out->faceinfo = &fi[in->faceinfo];
 	}
 }
 
@@ -1226,10 +1334,35 @@ static void Mod_LoadDeluxemap( void )
 
 /*
 =================
+Mod_LoadLightVecs
+=================
+*/
+static void Mod_LoadLightVecs( const dlump_t *l )
+{
+	byte	*in;
+
+	in = (void *)(mod_base + l->fileofs);
+	world.vecdatasize = l->filelen;
+
+	if( world.vecdatasize != world.litdatasize )
+	{
+		MsgDev( D_ERROR, "Mod_LoadLightVecs: has mismatched size (%i should be %i)\n", world.vecdatasize, world.litdatasize );
+		world.deluxedata = NULL;
+		world.vecdatasize = 0;
+		return;
+	}
+
+	world.deluxedata = Mem_Alloc( loadmodel->mempool, world.vecdatasize );
+	Q_memcpy( world.deluxedata, in, world.vecdatasize );
+	MsgDev( D_INFO, "Mod_LoadLightVecs: loaded\n" );
+}
+
+/*
+=================
 Mod_LoadLighting
 =================
 */
-static void Mod_LoadLighting( const dlump_t *l )
+static void Mod_LoadLighting( const dlump_t *l, dextrahdr_t *extrahdr )
 {
 	byte	d, *in;
 	color24	*out;
@@ -1273,9 +1406,22 @@ static void Mod_LoadLighting( const dlump_t *l )
 		break;
 	}
 
-	// also try to load deluxemap
-	Mod_LoadDeluxemap ();
+	if( !world.loading ) return;	// only world can have deluxedata (FIXME: what about quake models?)
+
+	// not supposed to be load ?
+	if( !FBitSet( host.features, ENGINE_LOAD_DELUXEDATA ))
+	{
+		world.deluxedata = NULL;
+		world.vecdatasize = 0;
+		return;
+	}
+
+	// try to loading deluxemap too
+	if( extrahdr != NULL )
+		Mod_LoadLightVecs( &extrahdr->lumps[LUMP_LIGHTVECS] );
+	else Mod_LoadDeluxemap (); // old method
 }
+
 
 /*
 =================
@@ -1288,10 +1434,11 @@ static void Mod_CalcSurfaceExtents( msurface_t *surf )
 {
 	float		mins[2], maxs[2], val;
 	int		bmins[2], bmaxs[2];
-	int		i, j, e;
+	int		i, j, e, sample_size;
 	mtexinfo_t	*tex;
 	mvertex_t		*v;
 
+	sample_size = Mod_SampleSizeForFace( surf );
 	tex = surf->texinfo;
 
 	mins[0] = mins[1] = 999999;
@@ -1320,13 +1467,13 @@ static void Mod_CalcSurfaceExtents( msurface_t *surf )
 
 	for( i = 0; i < 2; i++ )
 	{
-		bmins[i] = floor( mins[i] / LM_SAMPLE_SIZE );
-		bmaxs[i] = ceil( maxs[i] / LM_SAMPLE_SIZE );
+		bmins[i] = floor( mins[i] / sample_size );
+		bmaxs[i] = ceil( maxs[i] / sample_size );
 
-		surf->texturemins[i] = bmins[i] * LM_SAMPLE_SIZE;
-		surf->extents[i] = (bmaxs[i] - bmins[i]) * LM_SAMPLE_SIZE;
+		surf->texturemins[i] = bmins[i] * sample_size;
+		surf->extents[i] = (bmaxs[i] - bmins[i]) * sample_size;
 
-		if(!( tex->flags & TEX_SPECIAL ) && surf->extents[i] > 4096 )
+		if( !FBitSet( tex->flags, TEX_SPECIAL ) && surf->extents[i] > 4096 )
 			MsgDev( D_ERROR, "Bad surface extents %i\n", surf->extents[i] );
 	}
 }
@@ -1374,7 +1521,7 @@ static void Mod_BuildPolygon( mextrasurf_t *info, msurface_t *surf, int numVerts
 	uint		bufSize;
 	vec3_t		normal, tangent, binormal;
 	mtexinfo_t	*texinfo = surf->texinfo;
-	int		i, numElems;
+	int		i, numElems, sample_size;
 	byte		*buffer;
 	msurfmesh_t	*mesh;
 
@@ -1384,6 +1531,7 @@ static void Mod_BuildPolygon( mextrasurf_t *info, msurface_t *surf, int numVerts
 	bufSize = sizeof( msurfmesh_t ) + numVerts * sizeof( glvert_t ) + numElems * sizeof( word );
 	buffer = Mem_Alloc( loadmodel->mempool, bufSize );
 
+	sample_size = Mod_SampleSizeForFace( surf );
 	mesh = (msurfmesh_t *)buffer;
 	buffer += sizeof( msurfmesh_t );
 	mesh->numVerts = numVerts;
@@ -1440,14 +1588,14 @@ static void Mod_BuildPolygon( mextrasurf_t *info, msurface_t *surf, int numVerts
 
 		// lightmap texture coordinates
 		s = DotProduct( verts, texinfo->vecs[0] ) + texinfo->vecs[0][3] - surf->texturemins[0];
-		s += surf->light_s * LM_SAMPLE_SIZE;
-		s += LM_SAMPLE_SIZE >> 1;
-		s /= BLOCK_SIZE * LM_SAMPLE_SIZE;
+		s += surf->light_s * sample_size;
+		s += sample_size >> 1;
+		s /= BLOCK_SIZE * sample_size;
 
 		t = DotProduct( verts, texinfo->vecs[1] ) + texinfo->vecs[1][3] - surf->texturemins[1];
-		t += surf->light_t * LM_SAMPLE_SIZE;
-		t += LM_SAMPLE_SIZE >> 1;
-		t /= BLOCK_SIZE * LM_SAMPLE_SIZE;
+		t += surf->light_t * sample_size;
+		t += sample_size >> 1;
+		t /= BLOCK_SIZE * sample_size;
 
 		out->lmcoord[0] = s;
 		out->lmcoord[1] = t;
@@ -1472,6 +1620,7 @@ static void Mod_SubdividePolygon( mextrasurf_t *info, msurface_t *surf, int numV
 	mtexinfo_t	*texinfo = surf->texinfo;
 	vec2_t		totalST, totalLM;
 	float		s, t, scale;
+	int		sample_size;
 	int		i, j, f, b;
 	uint		bufSize;
 	byte		*buffer;
@@ -1483,6 +1632,8 @@ static void Mod_SubdividePolygon( mextrasurf_t *info, msurface_t *surf, int numV
 
 	for( i = 0, v = verts; i < numVerts; i++, v += 3 )
 		AddPointToBounds( v, mins, maxs );
+
+	sample_size = Mod_SampleSizeForFace( surf );
 
 	for( i = 0; i < 3; i++ )
 	{
@@ -1610,14 +1761,14 @@ static void Mod_SubdividePolygon( mextrasurf_t *info, msurface_t *surf, int numV
 		{
 			// lightmap texture coordinates
 			s = DotProduct( verts, texinfo->vecs[0] ) + texinfo->vecs[0][3] - surf->texturemins[0];
-			s += surf->light_s * LM_SAMPLE_SIZE;
-			s += LM_SAMPLE_SIZE >> 1;
-			s /= BLOCK_SIZE * LM_SAMPLE_SIZE;
+			s += surf->light_s * sample_size;
+			s += sample_size >> 1;
+			s /= BLOCK_SIZE * sample_size;
 
 			t = DotProduct( verts, texinfo->vecs[1] ) + texinfo->vecs[1][3] - surf->texturemins[1];
-			t += surf->light_t * LM_SAMPLE_SIZE;
-			t += LM_SAMPLE_SIZE >> 1;
-			t /= BLOCK_SIZE * LM_SAMPLE_SIZE;
+			t += surf->light_t * sample_size;
+			t += sample_size >> 1;
+			t /= BLOCK_SIZE * sample_size;
 		}
 		else
 		{
@@ -1778,7 +1929,7 @@ void Mod_BuildSurfacePolygons( msurface_t *surf, mextrasurf_t *info )
 	}
 
 	// subdivide water or sky sphere for Quake1 maps
-	if(( surf->flags & SURF_DRAWTURB && !( surf->flags & SURF_REFLECT )) || ( surf->flags & SURF_DRAWSKY && world.loading && world.sky_sphere ))
+	if(( surf->flags & SURF_DRAWTURB && !( surf->flags & SURF_REFLECT )))
 	{
 		Mod_SubdividePolygon( info, surf, surf->numedges, verts[0], 64.0f );
 		Mod_ConvertSurface( info, surf );
@@ -2158,6 +2309,17 @@ static void Mod_LoadLeafs( const dlump_t *l )
 	loadmodel->leafs = out;
 	loadmodel->numleafs = count;
 
+	if( world.loading )
+	{
+		// get visleafs from the submodel data
+		world.visclusters = loadmodel->submodels[0].visleafs;
+		world.visbytes = (world.visclusters + 7) >> 3;
+		world.visdata = (byte *)Mem_Alloc( loadmodel->mempool, world.visclusters * world.visbytes );
+
+		// enable full visibility as default
+		Q_memset( world.visdata, 0xFF, world.visclusters * world.visbytes );
+	}
+
 	for( i = 0; i < count; i++, in++, out++ )
 	{
 		for( j = 0; j < 3; j++ )
@@ -2169,6 +2331,29 @@ static void Mod_LoadLeafs( const dlump_t *l )
 		out->contents = in->contents;
 	
 		p = in->visofs;
+
+		if( world.loading )
+		{
+			out->cluster = ( i - 1 ); // solid leaf 0 has no visdata
+			if( out->cluster >= world.visclusters )
+				out->cluster = -1;
+
+			// ignore visofs errors on leaf 0 (solid)
+			if( p >= 0 && out->cluster >= 0 && loadmodel->visdata )
+			{
+				if( p < world.visdatasize )
+				{
+					byte	*inrow =  loadmodel->visdata + p;
+					byte	*inrowend = loadmodel->visdata + world.visdatasize;
+					byte	*outrow = world.visdata + out->cluster * world.visbytes;
+					byte	*outrowend = world.visdata + (out->cluster + 1) * world.visbytes;
+
+					Mod_DecompressVis( inrow, inrowend, outrow, outrowend );
+				}
+			else MsgDev( D_WARN, "Mod_LoadLeafs: invalid visofs for leaf #%i\n", i );
+			}
+		}
+		else out->cluster = -1; // no visclusters on bmodels
 
 		if( p == -1 ) out->compressed_vis = NULL;
 		else out->compressed_vis = loadmodel->visdata + p;
@@ -2193,6 +2378,14 @@ static void Mod_LoadLeafs( const dlump_t *l )
 
 	if( loadmodel->leafs[0].contents != CONTENTS_SOLID )
 		Host_MapDesignError( "Mod_LoadLeafs: Map %s has leaf 0 is not CONTENTS_SOLID\n", loadmodel->name );
+
+	// do some final things for world
+	if( world.loading )
+	{
+		// store size of fat pvs
+		world.fatbytes = (world.visclusters + 31) >> 3;
+		world.water_alpha = Mod_CheckWaterAlphaSupport();
+	}
 }
 
 /*
@@ -2224,6 +2417,9 @@ static void Mod_LoadPlanes( const dlump_t *l )
 			if( out->normal[j] < 0.0f )
 				out->signbits |= 1<<j;
 		}
+
+		if( VectorIsNull( out->normal ))
+			Host_MapDesignError( "Mod_LoadPlanes: bad normal for plane #%i", i );
 
 		out->dist = in->dist;
 		out->type = in->type;
@@ -2263,6 +2459,7 @@ static void Mod_LoadEntities( const dlump_t *l )
 	char	*pfile;
 	string	keyname;
 	char	token[2048];
+	char	wadstring[2048];
 
 	// make sure what we really has terminator
 	loadmodel->entities = Mem_Alloc( loadmodel->mempool, l->filelen + 1 );
@@ -2298,25 +2495,19 @@ static void Mod_LoadEntities( const dlump_t *l )
 
 			if( !Q_stricmp( keyname, "wad" ))
 			{
-				char	*path = token;
-				string	wadpath;
+				char	*pszWadFile;
+
+				Q_strncpy( wadstring, token, 2046 );
+				wadstring[2046] = 0;
+
+				if( !Q_strchr( wadstring, ';' ))
+					Q_strcat( wadstring, ";" );
 
 				// parse wad pathes
-				while( path && *path )
+				for (pszWadFile = strtok( wadstring, ";" ); pszWadFile!= NULL; pszWadFile = strtok( NULL, ";" ))
 				{
-					char *end = Q_strchr( path, ';' );
-					if( !end )
-						end = path + Q_strlen( path );
-					if( !end )
-					{
-						// if specified only once wad
-						if( !wadlist.count )
-							FS_FileBase( path, wadlist.wadnames[wadlist.count++] );
-						break;
-					}
-					Q_strncpy( wadpath, path, (end - path) + 1 );
-					FS_FileBase( wadpath, wadlist.wadnames[wadlist.count++] );
-					path += (end - path) + 1; // move pointer
+					COM_FixSlashes( pszWadFile );
+					FS_FileBase( pszWadFile, wadlist.wadnames[wadlist.count++] );
 					if( wadlist.count >= 256 ) break; // too many wads...
 				}
 			}
@@ -2565,135 +2756,6 @@ static void Mod_MakeHull0( void )
 
 /*
 =================
-Mod_CalcPHS
-=================
-*/
-void Mod_CalcPHS( void )
-{
-	int	hcount, vcount;
-	int	i, j, k, l, index, num;
-	int	rowbytes, rowwords;
-	int	bitbyte, rowsize = 0;
-	int	*visofs, total_size = 0;
-	byte	*vismap, *vismap_p;
-	byte	*uncompressed_vis;
-	byte	*uncompressed_pas;
-	byte	*compressed_pas;
-	byte	*scan, *comp;
-	uint	*dest, *src;
-	double	timestart;
-	size_t	phsdatasize;
-
-	// no worldmodel or no visdata
-	if( !world.loading || !worldmodel || !worldmodel->visdata )
-		return;
-
-	MsgDev( D_NOTE, "Building PAS...\n" );
-	timestart = Sys_DoubleTime();
-
-	// NOTE: first leaf is skipped becuase is a outside leaf. Now all leafs have shift up by 1.
-	// and last leaf (which equal worldmodel->numleafs) has no visdata! Add one extra leaf
-	// to avoid this situation.
-	num = worldmodel->numleafs;
-	rowwords = (num + 31) >> 5;
-	rowbytes = rowwords * 4;
-
-	// typically PHS reqiured more room because RLE fails on multiple 1 not 0
-	phsdatasize = world.visdatasize * 32; // empirically determined
-
-	// allocate pvs and phs data single array
-	visofs = Mem_Alloc( worldmodel->mempool, num * sizeof( int ));
-	uncompressed_vis = Mem_Alloc( worldmodel->mempool, rowbytes * num * 2 );
-	uncompressed_pas = uncompressed_vis + rowbytes * num;
-	compressed_pas = Mem_Alloc( worldmodel->mempool, phsdatasize );
-	vismap = vismap_p = compressed_pas; // compressed PHS buffer
-	scan = uncompressed_vis;
-	vcount = 0;
-
-	// uncompress pvs first
-	for( i = 0; i < num; i++, scan += rowbytes )
-	{
-		Q_memcpy( scan, Mod_LeafPVS( worldmodel->leafs + i, worldmodel ), rowbytes );
-		if( i == 0 ) continue;
-
-		for( j = 0; j < num; j++ )
-		{
-			if( scan[j>>3] & (1<<( j & 7 )))
-				vcount++;
-		}
-	}
-
-	scan = uncompressed_vis;
-	hcount = 0;
-
-	dest = (uint *)uncompressed_pas;
-
-	for( i = 0; i < num; i++, dest += rowwords, scan += rowbytes )
-	{
-		Q_memcpy( dest, scan, rowbytes );
-
-		for( j = 0; j < rowbytes; j++ )
-		{
-			bitbyte = scan[j];
-			if( !bitbyte ) continue;
-
-			for( k = 0; k < 8; k++ )
-			{
-				if(!( bitbyte & ( 1<<k )))
-					continue;
-				// or this pvs row into the phs
-				// +1 because pvs is 1 based
-				index = ((j<<3) + k + 1);
-				if( index >= num ) continue;
-
-				src = (uint *)uncompressed_vis + index * rowwords;
-				for( l = 0; l < rowwords; l++ )
-					dest[l] |= src[l];
-			}
-		}
-
-		// compress PHS data back
-		comp = Mod_CompressVis( (byte *)dest, (size_t *)&rowsize );
-		visofs[i] = vismap_p - vismap; // leaf 0 is a common solid 
-		total_size += rowsize;
-
-		if( total_size > phsdatasize )
-		{
-			Host_Error( "CalcPHS: vismap expansion overflow %s > %s\n", Q_memprint( total_size ), Q_memprint( phsdatasize ));
-		}
-
-		Q_memcpy( vismap_p, comp, rowsize );
-		vismap_p += rowsize; // move pointer
-
-		if( i == 0 ) continue;
-
-		for( j = 0; j < num; j++ )
-		{
-			if(((byte *)dest)[j>>3] & (1<<( j & 7 )))
-				hcount++;
-		}
-	}
-
-	// adjust compressed pas data to fit the size
-	compressed_pas = Mem_Realloc( worldmodel->mempool, compressed_pas, total_size );
-
-	// apply leaf pointers
-	for( i = 0; i < worldmodel->numleafs; i++ )
-		worldmodel->leafs[i].compressed_pas = compressed_pas + visofs[i];
-
-	// release uncompressed data
-	Mem_Free( uncompressed_vis );
-	Mem_Free( visofs );	// release vis offsets
-
-	// NOTE: we don't need to store off pointer to compressed pas-data
-	// because this is will be automatiaclly frees by mempool internal pointer
-	// and we never use this pointer after this point
-	MsgDev( D_NOTE, "Average leaves visible / audible / total: %i / %i / %i\n", vcount / num, hcount / num, num );
-	MsgDev( D_NOTE, "PAS building time: %g secs\n", Sys_DoubleTime() - timestart );
-}
-
-/*
-=================
 Mod_UnloadBrushModel
 
 Release all uploaded textures
@@ -2735,16 +2797,22 @@ Mod_LoadBrushModel
 */
 static void Mod_LoadBrushModel( model_t *mod, const void *buffer, qboolean *loaded )
 {
-	int	i, j;
-	int	sample_size;
-	char	*ents;
-	dheader_t	*header;
-	dmodel_t 	*bm;
+	int		i, j;
+	int		sample_size;
+	char		*ents;
+	dheader_t		*header;
+	dextrahdr_t	*extrahdr;
+	dmodel_t		*bm;
 
 	if( loaded ) *loaded = false;	
 	header = (dheader_t *)buffer;
 	loadmodel->type = mod_brush;
 	i = header->version;
+
+	// BSP31 and BSP30 have different offsets
+	if( i == XTBSP_VERSION )
+		extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader31_t ));
+	else extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader_t ));
 
 	switch( i )
 	{
@@ -2776,11 +2844,17 @@ static void Mod_LoadBrushModel( model_t *mod, const void *buffer, qboolean *load
 		MsgDev( D_ERROR, "%s has wrong version number (%i should be %i)\n", loadmodel->name, i, world.version );
 		return;		
 	}
+	loadmodel->numframes = sample_size; // NOTE: world store sample size into model_t->numframes
 	bmodel_version = i;	// share it
 
 	// swap all the lumps
 	mod_base = (byte *)header;
 	loadmodel->mempool = Mem_AllocPool( va( "^2%s^7", loadmodel->name ));
+
+	// make sure what extrahdr is valid
+	if( extrahdr->id != IDEXTRAHEADER || extrahdr->version != EXTRA_VERSION )
+		extrahdr = NULL; // no extra header
+
 
 	// load into heap
 	if( header->lumps[LUMP_ENTITIES].fileofs <= 1024 && (header->lumps[LUMP_ENTITIES].filelen % sizeof( dplane_t )) == 0 )
@@ -2800,13 +2874,14 @@ static void Mod_LoadBrushModel( model_t *mod, const void *buffer, qboolean *load
 	if( world.version <= 29 && world.mapversion == 220 && (header->lumps[LUMP_LIGHTING].filelen % 3) == 0 )
 		world.version = bmodel_version = HLBSP_VERSION;
 
+	Mod_LoadSubmodels( &header->lumps[LUMP_MODELS] );
 	Mod_LoadVertexes( &header->lumps[LUMP_VERTEXES] );
 	Mod_LoadEdges( &header->lumps[LUMP_EDGES] );
 	Mod_LoadSurfEdges( &header->lumps[LUMP_SURFEDGES] );
 	Mod_LoadTextures( &header->lumps[LUMP_TEXTURES] );
-	Mod_LoadLighting( &header->lumps[LUMP_LIGHTING] );
+	Mod_LoadLighting( &header->lumps[LUMP_LIGHTING], extrahdr );
 	Mod_LoadVisibility( &header->lumps[LUMP_VISIBILITY] );
-	Mod_LoadTexInfo( &header->lumps[LUMP_TEXINFO] );
+	Mod_LoadTexInfo( &header->lumps[LUMP_TEXINFO], extrahdr );
 	Mod_LoadSurfaces( &header->lumps[LUMP_FACES] );
 	Mod_LoadMarkSurfaces( &header->lumps[LUMP_MARKSURFACES] );
 	Mod_LoadLeafs( &header->lumps[LUMP_LEAFS] );
@@ -2815,11 +2890,9 @@ static void Mod_LoadBrushModel( model_t *mod, const void *buffer, qboolean *load
 	if( bmodel_version == XTBSP_VERSION )
 		Mod_LoadClipnodes31( &header->lumps[LUMP_CLIPNODES], &header->lumps[LUMP_CLIPNODES2], &header->lumps[LUMP_CLIPNODES3] );
 	else Mod_LoadClipnodes( &header->lumps[LUMP_CLIPNODES] );
-	Mod_LoadSubmodels( &header->lumps[LUMP_MODELS] );
 
 	Mod_MakeHull0 ();
 	
-	loadmodel->numframes = 2;	// regular and alternate animation
 	ents = loadmodel->entities;
 	
 	// set up the submodels
@@ -2847,12 +2920,14 @@ static void Mod_LoadBrushModel( model_t *mod, const void *buffer, qboolean *load
 		if( i != 0 )
 		{
 			// HACKHACK: c2a1 issues
-			if( !bm->origin[0] && !bm->origin[1] ) mod->flags |= MODEL_HAS_ORIGIN;
+			if( !bm->origin[0] && !bm->origin[1] )
+				mod->flags |= MODEL_HAS_ORIGIN;
 
 			Mod_FindModelOrigin( ents, va( "*%i", i ), bm->origin );
 
 			// flag 2 is indicated model with origin brush!
-			if( !VectorIsNull( bm->origin )) mod->flags |= MODEL_HAS_ORIGIN;
+			if( !VectorIsNull( bm->origin ))
+				SetBits( mod->flags, MODEL_HAS_ORIGIN );
 		}
 
 		for( j = 0; i != 0 && j < mod->nummodelsurfaces; j++ )
@@ -2871,7 +2946,7 @@ static void Mod_LoadBrushModel( model_t *mod, const void *buffer, qboolean *load
 				if( surf->plane->type == PLANE_Z )
 				{
 					// kill bottom plane too
-					if( info->mins[2] == bm->mins[2] + 1 )
+					if( info->mins[2] == bm->mins[2] + 1.0f )
 						surf->flags |= SURF_WATERCSG;
 				}
 				else
@@ -3030,13 +3105,28 @@ model_t *Mod_LoadModel( model_t *mod, qboolean crash )
 
 		return NULL;
 	}
-#ifndef XASH_DEDICATED
-	else if( clgame.drawFuncs.Mod_ProcessUserData != NULL )
+	else
 	{
-		// let the client.dll load custom data
-		clgame.drawFuncs.Mod_ProcessUserData( mod, true, buf );
-	}
+		if( host.type == HOST_DEDICATED )
+		{
+			if( svgame.physFuncs.Mod_ProcessUserData != NULL )
+			{
+				// let the server.dll load custom data
+				svgame.physFuncs.Mod_ProcessUserData( mod, true, buf );
+			}
+		}
+#ifndef XASH_DEDICATED
+		else
+		{
+			if( clgame.drawFuncs.Mod_ProcessUserData != NULL )
+			{
+				// let the client.dll load custom data
+				clgame.drawFuncs.Mod_ProcessUserData( mod, true, buf );
+			}
+		}
 #endif
+	}
+
 	Mem_Free( buf );
 
 	return mod;
@@ -3091,7 +3181,6 @@ void Mod_LoadWorld( const char *name, uint *checksum, qboolean multiplayer )
 	}
 
 	// clear all studio submodels on restart
-	// HACKHACK: throw all external BSP-models to refresh their lightmaps properly
 	for( i = 1; i < cm_nummodels; i++ )
 	{
 		if( cm_models[i].type == mod_studio )
@@ -3112,9 +3201,6 @@ void Mod_LoadWorld( const char *name, uint *checksum, qboolean multiplayer )
 	world.loading = false;
 
 	if( checksum ) *checksum = world.checksum;
-		
-	// calc Potentially Hearable Set and compress it
-	Mod_CalcPHS();
 }
 
 /*
@@ -3166,7 +3252,9 @@ void Mod_GetFrames( int handle, int *numFrames )
 		return;
 	}
 
-	*numFrames = mod->numframes;
+	if( mod->type == mod_brush )
+		*numFrames = 2; // regular and alternate animation
+	else *numFrames = mod->numframes;
 	if( *numFrames < 1 ) *numFrames = 1;
 }
 
@@ -3311,7 +3399,233 @@ model_t *GAME_EXPORT Mod_Handle( int handle )
 	return com_models[handle];
 }
 
-wadlist_t *Mod_WadList( void )
+/*
+==================
+Mod_CheckLump
+
+check lump for existing
+==================
+*/
+int Mod_CheckLump( const char *filename, const int lump, int *lumpsize )
 {
-	return &wadlist;
+	file_t		*f = FS_Open( filename, "rb", true );
+	byte		buffer[sizeof( dheader31_t ) + sizeof( dextrahdr_t )];
+	size_t		prefetch_size = sizeof( buffer );
+	dextrahdr_t	*extrahdr;
+	dheader_t		*header;
+
+	if( !f ) return LUMP_LOAD_COULDNT_OPEN;
+
+	if( FS_Read( f, buffer, prefetch_size ) != prefetch_size )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_BAD_HEADER;
+	}
+
+	header = (dheader_t *)buffer;
+
+	if( header->version != HLBSP_VERSION && header->version != XTBSP_VERSION )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_BAD_VERSION;
+	}
+
+	// BSP31 and BSP30 have different offsets
+	if( header->version == XTBSP_VERSION )
+		extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader31_t ));
+	else extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader_t ));
+
+	if( extrahdr->id != IDEXTRAHEADER || extrahdr->version != EXTRA_VERSION )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_NO_EXTRADATA;
+	}
+
+	if( lump < 0 || lump >= EXTRA_LUMPS )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_INVALID_NUM;
+	}
+
+	if( extrahdr->lumps[lump].filelen <= 0 )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_NOT_EXIST;
+	}
+
+	if( lumpsize )
+		*lumpsize = extrahdr->lumps[lump].filelen;
+
+	FS_Close( f );
+
+	return LUMP_LOAD_OK;
+}
+
+/*
+==================
+Mod_ReadLump
+
+reading random lump by user request
+==================
+*/
+int Mod_ReadLump( const char *filename, const int lump, void **lumpdata, int *lumpsize )
+{
+	file_t		*f = FS_Open( filename, "rb", true );
+	byte		buffer[sizeof( dheader31_t ) + sizeof( dextrahdr_t )];
+	size_t		prefetch_size = sizeof( buffer );
+	dextrahdr_t	*extrahdr;
+	dheader_t		*header;
+	byte		*data;
+	int		length;
+
+	if( !f ) return LUMP_LOAD_COULDNT_OPEN;
+
+	if( FS_Read( f, buffer, prefetch_size ) != prefetch_size )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_BAD_HEADER;
+	}
+
+	header = (dheader_t *)buffer;
+
+	if( header->version != HLBSP_VERSION && header->version != XTBSP_VERSION )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_BAD_VERSION;
+	}
+
+	// BSP31 and BSP30 have different offsets
+	if( header->version == XTBSP_VERSION )
+		extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader31_t ));
+	else extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader_t ));
+
+	if( extrahdr->id != IDEXTRAHEADER || extrahdr->version != EXTRA_VERSION )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_NO_EXTRADATA;
+	}
+
+	if( lump < 0 || lump >= EXTRA_LUMPS )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_INVALID_NUM;
+	}
+
+	if( extrahdr->lumps[lump].filelen <= 0 )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_NOT_EXIST;
+	}
+
+	data = malloc( extrahdr->lumps[lump].filelen + 1 );
+	length = extrahdr->lumps[lump].filelen;
+
+	if( !data )
+	{
+		FS_Close( f );
+		return LUMP_LOAD_MEM_FAILED;
+	}
+
+	FS_Seek( f, extrahdr->lumps[lump].fileofs, SEEK_SET );
+
+	if( FS_Read( f, data, length ) != length )
+	{
+		Mem_Free( data );
+		FS_Close( f );
+		return LUMP_LOAD_CORRUPTED;
+	}
+
+	data[length] = 0; // write term
+	FS_Close( f );
+
+	if( lumpsize )
+		*lumpsize = length;
+	*lumpdata = data;
+
+	return LUMP_LOAD_OK;
+}
+
+/*
+==================
+Mod_SaveLump
+
+writing lump by user request
+only empty lumps is allows
+==================
+*/
+int Mod_SaveLump( const char *filename, const int lump, void *lumpdata, int lumpsize )
+{
+	file_t		*f = FS_Open( filename, "e+b", true );
+	byte		buffer[sizeof( dheader31_t ) + sizeof( dextrahdr_t )];
+	size_t		prefetch_size = sizeof( buffer );
+	dextrahdr_t	*extrahdr;
+	dheader_t		*header;
+
+	if( !f ) return LUMP_SAVE_COULDNT_OPEN;
+
+	if( !lumpdata || lumpsize <= 0 )
+		return LUMP_SAVE_NO_DATA;
+
+	if( FS_Read( f, buffer, prefetch_size ) != prefetch_size )
+	{
+		FS_Close( f );
+		return LUMP_SAVE_BAD_HEADER;
+	}
+
+	header = (dheader_t *)buffer;
+
+	if( header->version != HLBSP_VERSION && header->version != XTBSP_VERSION )
+	{
+		FS_Close( f );
+		return LUMP_SAVE_BAD_VERSION;
+	}
+
+	// BSP31 and BSP30 have different offsets
+	if( header->version == XTBSP_VERSION )
+		extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader31_t ));
+	else extrahdr = (dextrahdr_t *)((byte *)buffer + sizeof( dheader_t ));
+
+	if( extrahdr->id != IDEXTRAHEADER || extrahdr->version != EXTRA_VERSION )
+	{
+		FS_Close( f );
+		return LUMP_SAVE_NO_EXTRADATA;
+	}
+
+	if( lump < 0 || lump >= EXTRA_LUMPS )
+	{
+		FS_Close( f );
+		return LUMP_SAVE_INVALID_NUM;
+	}
+
+	if( extrahdr->lumps[lump].filelen != 0 )
+	{
+		FS_Close( f );
+		return LUMP_SAVE_ALREADY_EXIST;
+	}
+
+	FS_Seek( f, 0, SEEK_END );
+
+	// will be saved later
+	extrahdr->lumps[lump].fileofs = FS_Tell( f );
+	extrahdr->lumps[lump].filelen = lumpsize;
+
+	if( FS_Write( f, lumpdata, lumpsize ) != lumpsize )
+	{
+		FS_Close( f );
+		return LUMP_SAVE_CORRUPTED;
+	}
+
+	// update the header
+	if( header->version == XTBSP_VERSION )
+		FS_Seek( f, sizeof( dheader31_t ), SEEK_SET );
+	else FS_Seek( f, sizeof( dheader_t ), SEEK_SET );
+
+	if( FS_Write( f, extrahdr, sizeof( dextrahdr_t )) != sizeof( dextrahdr_t ))
+	{
+		FS_Close( f );
+		return LUMP_SAVE_CORRUPTED;
+	}
+
+	FS_Close( f );
+	return LUMP_SAVE_OK;
 }

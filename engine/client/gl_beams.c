@@ -35,7 +35,6 @@ typedef struct
 	vec3_t	color;
 	float	texcoord;	// Y texture coordinate
 	float	width;
-	float	alpha;
 } beamseg_t;
 
 static float	rgNoise[NOISE_DIVISIONS+1];	// global noise array
@@ -90,24 +89,12 @@ static cl_entity_t *CL_GetBeamEntityByIndex( int index )
 	return ent;
 }
 
-void BeamNormalizeColor( BEAM *pBeam, float r, float g, float b, float brightness ) 
+void BeamNormalizeColor( BEAM *pBeam, int r, int g, int b, float brightness )
 {
-	float	_max, scale;
-
-	_max = max( max( r, g ), b );
-
-	if( _max == 0 )
-	{
-		pBeam->r = pBeam->g = pBeam->b = 255.0f;
-		pBeam->brightness = brightness;
-	}
-
-	scale = 255.0f / _max;
-
-	pBeam->r = r * scale;
-	pBeam->g = g * scale;
-	pBeam->b = b * scale;
-	pBeam->brightness = ( brightness > 1.0f ) ? brightness : brightness * 255.0f;
+	pBeam->r = (float)r;
+	pBeam->g = (float)g;
+	pBeam->b = (float)b;
+	pBeam->brightness = brightness;
 }
 
 static qboolean ComputeBeamEntPosition( int beamEnt, vec3_t pt )
@@ -200,7 +187,7 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 
 	if( !cl_draw_beams->integer )
 		return;
-	
+
 	m_hSprite = R_GetSpriteTexture( Mod_Handle( modelIndex ), frame );
 
 	if( !m_hSprite || segments < 2  )
@@ -245,7 +232,7 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 	// Iterator to resample noise waveform (it needs to be generated in powers of 2)
 	noiseStep = (int)((float)( NOISE_DIVISIONS - 1 ) * div * 65536.0f );
 	noiseIndex = 0;
-	
+
 	if( flags & FBEAM_SINENOISE )
 	{
 		noiseIndex = 0;
@@ -272,9 +259,8 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 	{
 		beamseg_t	nextSeg;
 		vec3_t	vPoint1, vPoint2;
-	
+
 		ASSERT( noiseIndex < ( NOISE_DIVISIONS << 16 ));
-		nextSeg.alpha = 1.0f;
 
 		fraction = i * div;
 
@@ -329,7 +315,7 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 		nextSeg.width = width * 2.0f;
 		nextSeg.texcoord = vLast;
 
- 		if( segs_drawn > 0 )
+		if( segs_drawn > 0 )
 		{
 			// Get a vector that is perpendicular to us and perpendicular to the beam.
 			// This is used to fatten the beam.
@@ -355,12 +341,12 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 			VectorMA( curSeg.pos, ( curSeg.width * 0.5f ), vAveNormal, vPoint1 );
 			VectorMA( curSeg.pos, (-curSeg.width * 0.5f ), vAveNormal, vPoint2 );
 
-			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], curSeg.alpha );
+			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], 1.0f );
 			pglTexCoord2f( 0.0f, curSeg.texcoord );
 			pglNormal3fv( vAveNormal );
 			pglVertex3fv( vPoint1 );
 
-			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], curSeg.alpha );
+			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], 1.0f );
 			pglTexCoord2f( 1.0f, curSeg.texcoord );
 			pglNormal3fv( vAveNormal );
 			pglVertex3fv( vPoint2 );
@@ -369,19 +355,19 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 		curSeg = nextSeg;
 		segs_drawn++;
 
- 		if( segs_drawn == total_segs )
+		if( segs_drawn == total_segs )
 		{
 			// draw the last segment
 			VectorMA( curSeg.pos, ( curSeg.width * 0.5f ), vLastNormal, vPoint1 );
 			VectorMA( curSeg.pos, (-curSeg.width * 0.5f ), vLastNormal, vPoint2 );
 
 			// specify the points.
-			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], curSeg.alpha );
+			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], 1.0f );
 			pglTexCoord2f( 0.0f, curSeg.texcoord );
 			pglNormal3fv( vLastNormal );
 			pglVertex3fv( vPoint1 );
 
-			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], curSeg.alpha );
+			pglColor4f( curSeg.color[0], curSeg.color[1], curSeg.color[2], 1.0f );
 			pglTexCoord2f( 1.0f, curSeg.texcoord );
 			pglNormal3fv( vLastNormal );
 			pglVertex3fv( vPoint2 );
@@ -1460,12 +1446,10 @@ void CL_DrawBeam( BEAM *pbeam )
 		pStart = CL_GetBeamEntityByIndex( pbeam->startEntity ); 
 		if( pStart && pStart->curstate.rendermode != kRenderNormal )
 			pbeam->brightness = pStart->curstate.renderamt;
+
+		VectorScale( color, ( pbeam->brightness / 255.0f ), color );
+		VectorScale( color, ( 1.0f / 255.0f ), color );
 	}
-
-	VectorScale( color, ( pbeam->brightness / 255.0f ), color );
-	VectorScale( color, ( 1.0f / 255.0f ), color );
-
-	pglShadeModel( GL_SMOOTH );
 
 	switch( pbeam->type )
 	{
@@ -1496,7 +1480,6 @@ void CL_DrawBeam( BEAM *pbeam )
 		MsgDev( D_ERROR, "CL_DrawBeam:  Unknown beam type %i\n", pbeam->type );
 		break;
 	}
-	pglShadeModel( GL_FLAT );
 }
 
 /*
@@ -1535,9 +1518,9 @@ void CL_DrawCustomBeam( cl_entity_t *pbeam )
 	beam.width = pbeam->curstate.scale;
 	beam.amplitude = (float)(pbeam->curstate.body * 0.1f);
 	beam.brightness = pbeam->curstate.renderamt;
-	beam.r = pbeam->curstate.rendercolor.r;
-	beam.g = pbeam->curstate.rendercolor.g;
-	beam.b = pbeam->curstate.rendercolor.b;
+	beam.r = pbeam->curstate.rendercolor.r / 255.0f;
+	beam.g = pbeam->curstate.rendercolor.g / 255.0f;
+	beam.b = pbeam->curstate.rendercolor.b / 255.0f;
 	beam.flags = 0;
 
 	VectorSubtract( beam.target, beam.source, beam.delta );
@@ -1991,72 +1974,72 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 	switch( beamType )
 	{
 	case TE_BEAMPOINTS:
-		start[0] = BF_ReadCoord( msg );
-		start[1] = BF_ReadCoord( msg );
-		start[2] = BF_ReadCoord( msg );
-		end[0] = BF_ReadCoord( msg );
-		end[1] = BF_ReadCoord( msg );
-		end[2] = BF_ReadCoord( msg );
-		modelIndex = BF_ReadShort( msg );
-		startFrame = BF_ReadByte( msg );
-		frameRate = (float)BF_ReadByte( msg );
-		life = (float)(BF_ReadByte( msg ) * 0.1f);
-		width = (float)(BF_ReadByte( msg ) * 0.1f);
-		noise = (float)(BF_ReadByte( msg ) * 0.1f);
-		r = (float)BF_ReadByte( msg );
-		g = (float)BF_ReadByte( msg );
-		b = (float)BF_ReadByte( msg );
-		brightness = (float)BF_ReadByte( msg );
-		speed = (float)(BF_ReadByte( msg ) * 0.1f);
+		start[0] = MSG_ReadCoord( msg );
+		start[1] = MSG_ReadCoord( msg );
+		start[2] = MSG_ReadCoord( msg );
+		end[0] = MSG_ReadCoord( msg );
+		end[1] = MSG_ReadCoord( msg );
+		end[2] = MSG_ReadCoord( msg );
+		modelIndex = MSG_ReadShort( msg );
+		startFrame = MSG_ReadByte( msg );
+		frameRate = (float)MSG_ReadByte( msg );
+		life = (float)(MSG_ReadByte( msg ) * 0.1f);
+		width = (float)(MSG_ReadByte( msg ) * 0.1f);
+		noise = (float)(MSG_ReadByte( msg ) * 0.1f);
+		r = (float)MSG_ReadByte( msg );
+		g = (float)MSG_ReadByte( msg );
+		b = (float)MSG_ReadByte( msg );
+		brightness = (float)MSG_ReadByte( msg );
+		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamPoints( start, end, modelIndex, life, width, noise, brightness, speed, startFrame,
 			frameRate, r, g, b );
 		break;
 	case TE_BEAMENTPOINT:
-		startEnt = BF_ReadShort( msg );
-		end[0] = BF_ReadCoord( msg );
-		end[1] = BF_ReadCoord( msg );
-		end[2] = BF_ReadCoord( msg );
-		modelIndex = BF_ReadShort( msg );
-		startFrame = BF_ReadByte( msg );
-		frameRate = (float)BF_ReadByte( msg );
-		life = (float)(BF_ReadByte( msg ) * 0.1f);
-		width = (float)(BF_ReadByte( msg ) * 0.1f);
-		noise = (float)(BF_ReadByte( msg ) * 0.01f);
-		r = (float)BF_ReadByte( msg );
-		g = (float)BF_ReadByte( msg );
-		b = (float)BF_ReadByte( msg );
-		brightness = (float)BF_ReadByte( msg );
-		speed = (float)(BF_ReadByte( msg ) * 0.1f);
+		startEnt = MSG_ReadShort( msg );
+		end[0] = MSG_ReadCoord( msg );
+		end[1] = MSG_ReadCoord( msg );
+		end[2] = MSG_ReadCoord( msg );
+		modelIndex = MSG_ReadShort( msg );
+		startFrame = MSG_ReadByte( msg );
+		frameRate = (float)MSG_ReadByte( msg );
+		life = (float)(MSG_ReadByte( msg ) * 0.1f);
+		width = (float)(MSG_ReadByte( msg ) * 0.1f);
+		noise = (float)(MSG_ReadByte( msg ) * 0.01f);
+		r = (float)MSG_ReadByte( msg );
+		g = (float)MSG_ReadByte( msg );
+		b = (float)MSG_ReadByte( msg );
+		brightness = (float)MSG_ReadByte( msg );
+		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamEntPoint( startEnt, end, modelIndex, life, width, noise, brightness, speed, startFrame,
 		frameRate, r, g, b );
 		break;
 	case TE_LIGHTNING:
-		start[0] = BF_ReadCoord( msg );
-		start[1] = BF_ReadCoord( msg );
-		start[2] = BF_ReadCoord( msg );
-		end[0] = BF_ReadCoord( msg );
-		end[1] = BF_ReadCoord( msg );
-		end[2] = BF_ReadCoord( msg );
-		life = (float)(BF_ReadByte( msg ) * 0.1f);
-		width = (float)(BF_ReadByte( msg ) * 0.1f);
-		noise = (float)(BF_ReadByte( msg ) * 0.1f);
-		modelIndex = BF_ReadShort( msg );
+		start[0] = MSG_ReadCoord( msg );
+		start[1] = MSG_ReadCoord( msg );
+		start[2] = MSG_ReadCoord( msg );
+		end[0] = MSG_ReadCoord( msg );
+		end[1] = MSG_ReadCoord( msg );
+		end[2] = MSG_ReadCoord( msg );
+		life = (float)(MSG_ReadByte( msg ) * 0.1f);
+		width = (float)(MSG_ReadByte( msg ) * 0.1f);
+		noise = (float)(MSG_ReadByte( msg ) * 0.1f);
+		modelIndex = MSG_ReadShort( msg );
 		CL_BeamLightning( start, end, modelIndex, life, width, noise, 255.0f, 1.0f );
 		break;
 	case TE_BEAMENTS:
-		startEnt = BF_ReadShort( msg );
-		endEnt = BF_ReadShort( msg );
-		modelIndex = BF_ReadShort( msg );
-		startFrame = BF_ReadByte( msg );
-		frameRate = (float)(BF_ReadByte( msg ) * 0.1f);
-		life = (float)(BF_ReadByte( msg ) * 0.1f);
-		width = (float)(BF_ReadByte( msg ) * 0.1f);
-		noise = (float)(BF_ReadByte( msg ) * 0.01f);
-		r = (float)BF_ReadByte( msg );
-		g = (float)BF_ReadByte( msg );
-		b = (float)BF_ReadByte( msg );
-		brightness = (float)BF_ReadByte( msg );
-		speed = (float)(BF_ReadByte( msg ) * 0.1f);
+		startEnt = MSG_ReadShort( msg );
+		endEnt = MSG_ReadShort( msg );
+		modelIndex = MSG_ReadShort( msg );
+		startFrame = MSG_ReadByte( msg );
+		frameRate = (float)(MSG_ReadByte( msg ) * 0.1f);
+		life = (float)(MSG_ReadByte( msg ) * 0.1f);
+		width = (float)(MSG_ReadByte( msg ) * 0.1f);
+		noise = (float)(MSG_ReadByte( msg ) * 0.01f);
+		r = (float)MSG_ReadByte( msg );
+		g = (float)MSG_ReadByte( msg );
+		b = (float)MSG_ReadByte( msg );
+		brightness = (float)MSG_ReadByte( msg );
+		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamEnts( startEnt, endEnt, modelIndex, life, width, noise, brightness, speed, startFrame,
 		frameRate, r, g, b );
 		break;
@@ -2064,64 +2047,64 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 		MsgDev( D_ERROR, "TE_BEAM is obsolete\n" );
 		break;
 	case TE_BEAMSPRITE:
-		start[0] = BF_ReadCoord( msg );
-		start[1] = BF_ReadCoord( msg );
-		start[2] = BF_ReadCoord( msg );
-		end[0] = BF_ReadCoord( msg );
-		end[1] = BF_ReadCoord( msg );
-		end[2] = BF_ReadCoord( msg );
-		modelIndex = BF_ReadShort( msg );	// beam model
-		startFrame = BF_ReadShort( msg );	// sprite model
+		start[0] = MSG_ReadCoord( msg );
+		start[1] = MSG_ReadCoord( msg );
+		start[2] = MSG_ReadCoord( msg );
+		end[0] = MSG_ReadCoord( msg );
+		end[1] = MSG_ReadCoord( msg );
+		end[2] = MSG_ReadCoord( msg );
+		modelIndex = MSG_ReadShort( msg );	// beam model
+		startFrame = MSG_ReadShort( msg );	// sprite model
 		CL_BeamSprite( start, end, modelIndex, startFrame );
 		break;
 	case TE_BEAMTORUS:
 	case TE_BEAMDISK:
 	case TE_BEAMCYLINDER:
-		start[0] = BF_ReadCoord( msg );
-		start[1] = BF_ReadCoord( msg );
-		start[2] = BF_ReadCoord( msg );
-		end[0] = BF_ReadCoord( msg );
-		end[1] = BF_ReadCoord( msg );
-		end[2] = BF_ReadCoord( msg );
-		modelIndex = BF_ReadShort( msg );
-		startFrame = BF_ReadByte( msg );
-		frameRate = (float)(BF_ReadByte( msg ) * 0.1f);
-		life = (float)(BF_ReadByte( msg ) * 0.1f);
-		width = (float)BF_ReadByte( msg );
-		noise = (float)(BF_ReadByte( msg ) * 0.1f);
-		r = (float)BF_ReadByte( msg );
-		g = (float)BF_ReadByte( msg );
-		b = (float)BF_ReadByte( msg );
-		brightness = (float)BF_ReadByte( msg );
-		speed = (float)(BF_ReadByte( msg ) * 0.1f);
+		start[0] = MSG_ReadCoord( msg );
+		start[1] = MSG_ReadCoord( msg );
+		start[2] = MSG_ReadCoord( msg );
+		end[0] = MSG_ReadCoord( msg );
+		end[1] = MSG_ReadCoord( msg );
+		end[2] = MSG_ReadCoord( msg );
+		modelIndex = MSG_ReadShort( msg );
+		startFrame = MSG_ReadByte( msg );
+		frameRate = (float)(MSG_ReadByte( msg ) * 0.1f);
+		life = (float)(MSG_ReadByte( msg ) * 0.1f);
+		width = (float)MSG_ReadByte( msg );
+		noise = (float)(MSG_ReadByte( msg ) * 0.1f);
+		r = (float)MSG_ReadByte( msg );
+		g = (float)MSG_ReadByte( msg );
+		b = (float)MSG_ReadByte( msg );
+		brightness = (float)MSG_ReadByte( msg );
+		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamCirclePoints( beamType, start, end, modelIndex, life, width, noise, brightness, speed,
 		startFrame, frameRate, r, g, b );
 		break;
 	case TE_BEAMFOLLOW:
-		startEnt = BF_ReadShort( msg );
-		modelIndex = BF_ReadShort( msg );
-		life = (float)(BF_ReadByte( msg ) * 0.1f);
-		width = (float)BF_ReadByte( msg );
-		r = (float)BF_ReadByte( msg );
-		g = (float)BF_ReadByte( msg );
-		b = (float)BF_ReadByte( msg );
-		brightness = (float)BF_ReadByte( msg );
+		startEnt = MSG_ReadShort( msg );
+		modelIndex = MSG_ReadShort( msg );
+		life = (float)(MSG_ReadByte( msg ) * 0.1f);
+		width = (float)MSG_ReadByte( msg );
+		r = (float)MSG_ReadByte( msg );
+		g = (float)MSG_ReadByte( msg );
+		b = (float)MSG_ReadByte( msg );
+		brightness = (float)MSG_ReadByte( msg );
 		CL_BeamFollow( startEnt, modelIndex, life, width, r, g, b, brightness );
 		break;
 	case TE_BEAMRING:
-		startEnt = BF_ReadShort( msg );
-		endEnt = BF_ReadShort( msg );
-		modelIndex = BF_ReadShort( msg );
-		startFrame = BF_ReadByte( msg );
-		frameRate = (float)BF_ReadByte( msg );
-		life = (float)(BF_ReadByte( msg ) * 0.1f);
-		width = (float)(BF_ReadByte( msg ) * 0.1f);
-		noise = (float)(BF_ReadByte( msg ) * 0.1f);
-		r = (float)BF_ReadByte( msg );
-		g = (float)BF_ReadByte( msg );
-		b = (float)BF_ReadByte( msg );
-		brightness = (float)BF_ReadByte( msg );
-		speed = (float)(BF_ReadByte( msg ) * 0.1f);
+		startEnt = MSG_ReadShort( msg );
+		endEnt = MSG_ReadShort( msg );
+		modelIndex = MSG_ReadShort( msg );
+		startFrame = MSG_ReadByte( msg );
+		frameRate = (float)MSG_ReadByte( msg );
+		life = (float)(MSG_ReadByte( msg ) * 0.1f);
+		width = (float)(MSG_ReadByte( msg ) * 0.1f);
+		noise = (float)(MSG_ReadByte( msg ) * 0.1f);
+		r = (float)MSG_ReadByte( msg );
+		g = (float)MSG_ReadByte( msg );
+		b = (float)MSG_ReadByte( msg );
+		brightness = (float)MSG_ReadByte( msg );
+		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamRing( startEnt, endEnt, modelIndex, life, width, noise, brightness, speed, startFrame,
 		frameRate, r, g, b );
 		break;
@@ -2129,7 +2112,7 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 		MsgDev( D_ERROR, "TE_BEAMHOSE is obsolete\n" );
 		break;
 	case TE_KILLBEAM:
-		startEnt = BF_ReadShort( msg );
+		startEnt = MSG_ReadShort( msg );
 		CL_BeamKill( startEnt );
 		break;
 	}

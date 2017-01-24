@@ -152,7 +152,7 @@ int SV_CalcPacketLoss( sv_client_t *cl )
 	lost  = 0;
 	count = 0;
 
-	if( cl->fakeclient )
+	if( FBitSet( cl->flags, FCL_FAKECLIENT ) )
 		return 0;
 
 	numsamples = SV_UPDATE_BACKUP / 2;
@@ -160,9 +160,10 @@ int SV_CalcPacketLoss( sv_client_t *cl )
 	for( i = 0; i < numsamples; i++ )
 	{
 		frame = &cl->frames[(cl->netchan.incoming_acknowledged - 1 - i) & SV_UPDATE_MASK];
-		count++;
 		if( frame->latency == -1 )
 			lost++;
+
+		count++;
 	}
 
 	if( !count ) return 100;
@@ -208,8 +209,18 @@ void SV_UpdateMovevars( qboolean initialize )
 
 	// check range
 	if( sv_zmax->value < 256.0f ) Cvar_SetFloat( "sv_zmax", 256.0f );
-	if( sv_zmax->value > 131070.0f ) Cvar_SetFloat( "sv_zmax", 131070.0f );
 
+	// clamp it right
+	if( host.features & ENGINE_WRITE_LARGE_COORD )
+	{
+		if( sv_zmax->value > 131070.0f )
+			Cvar_SetFloat( "sv_zmax", 131070.0f );
+	}
+	else
+	{
+		if( sv_zmax->value > 32767.0f )
+			Cvar_SetFloat( "sv_zmax", 32767.0f );
+	}
 	svgame.movevars.gravity = sv_gravity->value;
 	svgame.movevars.stopspeed = sv_stopspeed->value;
 	svgame.movevars.maxspeed = sv_maxspeed->value;
@@ -256,9 +267,9 @@ void pfnUpdateServerInfo( const char *szKey, const char *szValue, const char *un
 
 	if( !cv || !cv->modified ) return; // this cvar not changed
 
-	BF_WriteByte( &sv.reliable_datagram, svc_serverinfo );
-	BF_WriteString( &sv.reliable_datagram, szKey );
-	BF_WriteString( &sv.reliable_datagram, szValue );
+	MSG_WriteByte( &sv.reliable_datagram, svc_serverinfo );
+	MSG_WriteString( &sv.reliable_datagram, szKey );
+	MSG_WriteString( &sv.reliable_datagram, szValue );
 	cv->modified = false; // reset state
 }
 
@@ -327,22 +338,25 @@ void SV_ReadPackets( void )
 	{
 		if( !svs.initialized )
 		{
-			BF_Init( &net_message, "ClientPacket", net_message_buffer, curSize );
+			MSG_Init( &net_message, "ClientPacket", net_message_buffer, curSize );
 
 			// check for rcon here
-			if( BF_GetMaxBytes( &net_message ) >= 4 && *(int *)net_message.pData == -1 )
+			if( !svs.initialized )
 			{
-				char *args, *c;
-				BF_Clear( &net_message  );
-				BF_ReadLong( &net_message  );// skip the -1 marker
+				char	*args, *c;
 
-				args = BF_ReadStringLine( &net_message  );
+				MSG_Clear( &net_message  );
+				MSG_ReadLong( &net_message  );// skip the -1 marker
+
+				args = MSG_ReadStringLine( &net_message  );
 				Cmd_TokenizeString( args );
 				c = Cmd_Argv( 0 );
 
 				if( !Q_strcmp( c, "rcon" ))
 					SV_RemoteCommand( net_from, &net_message );
 			}
+			else SV_ConnectionlessPacket( net_from, &net_message );
+
 			continue;
 		}
 		if( *((int *)&net_message_buffer) == 0xFFFFFFFE )
@@ -355,7 +369,7 @@ void SV_ReadPackets( void )
 
 			for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ )
 			{
-				if( cl->state == cs_free || cl->fakeclient )
+				if( cl->state == cs_free || FBitSet( cl->flags, FCL_FAKECLIENT ) )
 					continue;
 
 				if( !NET_CompareBaseAdr( net_from, cl->netchan.remote_address ))
@@ -376,10 +390,10 @@ void SV_ReadPackets( void )
 			if( !NetSplit_GetLong( &cl->netchan.netsplit, &net_from, net_message_buffer, &curSize ) )
 				continue;
 		}
-		BF_Init( &net_message, "ClientPacket", net_message_buffer, curSize );
+		MSG_Init( &net_message, "ClientPacket", net_message_buffer, curSize );
 
 		// check for connectionless packet (0xffffffff) first
-		if( BF_GetMaxBytes( &net_message ) >= 4 && *(int *)net_message.pData == -1 )
+		if( MSG_GetMaxBytes( &net_message ) >= 4 && *(int *)net_message.pData == -1 )
 		{
 			SV_ConnectionlessPacket( net_from, &net_message );
 			continue;
@@ -388,15 +402,15 @@ void SV_ReadPackets( void )
 
 		// read the qport out of the message so we can fix up
 		// stupid address translating routers
-		BF_Clear( &net_message );
-		BF_ReadLong( &net_message );	// sequence number
-		BF_ReadLong( &net_message );	// sequence number
-		qport = (int)BF_ReadShort( &net_message ) & 0xffff;
+		MSG_Clear( &net_message );
+		MSG_ReadLong( &net_message );	// sequence number
+		MSG_ReadLong( &net_message );	// sequence number
+		qport = (int)MSG_ReadShort( &net_message ) & 0xffff;
 
 		// check for packets from connected clients
 		for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ )
 		{
-			if( cl->state == cs_free || cl->fakeclient )
+			if( cl->state == cs_free || FBitSet( cl->flags, FCL_FAKECLIENT ) )
 				continue;
 
 			if( !NET_CompareBaseAdr( net_from, cl->netchan.remote_address ))
@@ -413,15 +427,15 @@ void SV_ReadPackets( void )
 
 			if( Netchan_Process( &cl->netchan, &net_message ))
 			{	
-				if( sv_maxclients->integer == 1 || cl->state != cs_spawned )
-					cl->send_message = true; // reply at end of frame
+				if(( sv_maxclients->integer == 1 && !FBitSet( host.features, ENGINE_FIXED_FRAMERATE )) || cl->state != cs_spawned )
+					SetBits( cl->flags, FCL_SEND_NET_MESSAGE );
 
 				// this is a valid, sequenced packet, so process it
 				if( cl->state != cs_zombie )
 				{
 					cl->lastmessage = host.realtime; // don't timeout
 					SV_ExecuteClientMessage( cl, &net_message );
-					svgame.globals->frametime = host.frametime;
+					svgame.globals->frametime = sv.frametime;
 					svgame.globals->time = sv.time;
 				}
 			}
@@ -431,7 +445,7 @@ void SV_ReadPackets( void )
 			{
 				if( Netchan_CopyNormalFragments( &cl->netchan, &net_message ))
 				{
-					BF_Clear( &net_message );
+					MSG_Clear( &net_message );
 					SV_ExecuteClientMessage( cl, &net_message );
 				}
 
@@ -446,6 +460,9 @@ void SV_ReadPackets( void )
 		if( i != sv_maxclients->integer )
 			continue;
 	}
+
+	svs.currentPlayer = NULL;
+	svs.currentPlayerNum = -1;
 }
 
 /*
@@ -474,12 +491,13 @@ void SV_CheckTimeouts( void )
 	{
 		if( cl->state >= cs_connected )
 		{
-			if( cl->edict && !( cl->edict->v.flags & (FL_SPECTATOR|FL_FAKECLIENT)))
+			if( cl->edict && !FBitSet( cl->edict->v.flags, FL_SPECTATOR|FL_FAKECLIENT ))
 				numclients++;
-                    }
+		}
 
 		// fake clients do not timeout
-		if( cl->fakeclient ) cl->lastmessage = host.realtime;
+		if( FBitSet( cl->flags, FCL_FAKECLIENT ) )
+			cl->lastmessage = host.realtime;
 
 		// message times may be wrong across a changelevel
 		if( cl->lastmessage > host.realtime )
@@ -506,11 +524,14 @@ void SV_CheckTimeouts( void )
 			continue;
 		}
 
-		if(( cl->state == cs_connected || cl->state == cs_spawned ) && cl->lastmessage < droppoint && !NET_IsLocalAddress( cl->netchan.remote_address ))
+		if(( cl->state == cs_connected || cl->state == cs_spawned ) && cl->lastmessage < droppoint )
 		{
-			SV_BroadcastPrintf( PRINT_HIGH, "%s timed out\n", cl->name );
-			SV_DropClient( cl ); 
-			cl->state = cs_free; // don't bother with zombie state
+			if( !NET_IsLocalAddress( cl->netchan.remote_address ))
+			{
+				SV_BroadcastPrintf( NULL, PRINT_HIGH, "%s timed out\n", cl->name );
+				SV_DropClient( cl );
+				cl->state = cs_free; // don't bother with zombie state
+			}
 		}
 	}
 
@@ -539,7 +560,7 @@ void SV_PrepWorldFrame( void )
 		ent = EDICT_NUM( i );
 		if( ent->free ) continue;
 
-		ent->v.effects &= ~(EF_MUZZLEFLASH|EF_NOINTERP);
+		ClearBits( ent->v.effects, EF_MUZZLEFLASH|EF_NOINTERP );
 	}
 }
 
@@ -605,10 +626,13 @@ qboolean SV_IsSimulating( void )
 
 	if( sv.hostflags & SVF_PLAYERSONLY )
 		return false;
+
 	if( !SV_HasActivePlayers())
 		return false;
+
 	if( !sv.paused && CL_IsInGame( ))
 		return true;
+
 	return false;
 }
 
@@ -617,13 +641,33 @@ qboolean SV_IsSimulating( void )
 SV_RunGameFrame
 =================
 */
-void SV_RunGameFrame( void )
+qboolean SV_RunGameFrame( void )
 {
-	if( !SV_IsSimulating( )) return;
+	int	numFrames = 0;
 
-	SV_Physics();
+	if( !( sv.simulating = SV_IsSimulating( )))
+		return true;
 
-	sv.time += host.frametime;
+	if( FBitSet( host.features, ENGINE_FIXED_FRAMERATE ))
+	{
+		while( sv.time_residual >= sv.frametime )
+		{
+			SV_Physics();
+
+			sv.time_residual -= sv.frametime;
+			sv.time += sv.frametime;
+			numFrames++;
+		}
+		return (numFrames != 0);
+	}
+	else
+	{
+		SV_Physics();
+
+		sv.time += sv.frametime;
+
+		return true;
+	}
 }
 
 /*
@@ -641,7 +685,14 @@ void Host_ServerFrame( void )
 		return;
 	}
 
-	svgame.globals->frametime = host.frametime;
+	if( FBitSet( host.features, ENGINE_FIXED_FRAMERATE ))
+		sv.frametime = ( 1.0 / (double)( GAME_FPS - 0.01 )); // FP issues
+	else sv.frametime = host.frametime;
+
+	if( sv.simulating || sv.state != ss_active )
+		sv.time_residual += host.frametime;
+
+	svgame.globals->frametime = sv.frametime;
 
 	// check timeouts
 	SV_CheckTimeouts ();
@@ -662,8 +713,8 @@ void Host_ServerFrame( void )
 	SV_UpdateMovevars ( false );
 
 	// let everything in the world think and move
-	SV_RunGameFrame ();
-		
+	if( !SV_RunGameFrame ()) return;
+
 	// send messages back to the clients that had packets read this frame
 	SV_SendClientMessages ();
 
@@ -758,14 +809,14 @@ void SV_AddToMaster( netadr_t from, sizebuf_t *msg )
 		{
 			if( svs.clients[index].state >= cs_connected )
 			{
-				if( svs.clients[index].fakeclient )
+				if( FBitSet( svs.clients[index].flags, FCL_FAKECLIENT))
 					bots++;
 				else clients++;
 			}
 		}
 	}
 
-	challenge = BF_ReadUBitLong( msg, sizeof( uint ) << 3 );
+	challenge = MSG_ReadUBitLong( msg, sizeof( uint ) << 3 );
 
 	Info_SetValueForKey(s, "protocol",  va( "%d", PROTOCOL_VERSION ) ); // protocol version
 	Info_SetValueForKey(s, "challenge", va( "%u", challenge ) ); // challenge number
@@ -924,7 +975,7 @@ void SV_Init( void )
 	Cmd_AddCommand( "log", SV_ServerLog_f, "enables logging to file" );
 
 	SV_ClearSaveDir ();	// delete all temporary *.hl files
-	BF_Init( &net_message, "NetMessage", net_message_buffer, sizeof( net_message_buffer ));
+	MSG_Init( &net_message, "NetMessage", net_message_buffer, sizeof( net_message_buffer ));
 }
 
 /*
@@ -945,33 +996,33 @@ void SV_FinalMessage( char *message, qboolean reconnect )
 	int		i;
 
 	Q_memset( msg_buf, 0, 1024 );
-	BF_Init( &msg, "FinalMessage", msg_buf, sizeof( msg_buf ));
-	BF_WriteByte( &msg, svc_print );
-	BF_WriteByte( &msg, PRINT_HIGH );
-	BF_WriteString( &msg, va( "%s\n", message ));
+	MSG_Init( &msg, "FinalMessage", msg_buf, sizeof( msg_buf ));
+	MSG_WriteByte( &msg, svc_print );
+	MSG_WriteByte( &msg, PRINT_HIGH );
+	MSG_WriteString( &msg, va( "%s\n", message ));
 
 	if( reconnect )
 	{
-		BF_WriteByte( &msg, svc_changing );
+		MSG_WriteByte( &msg, svc_changing );
 
 		if( sv.loadgame || svgame.globals->maxClients > 1 || sv.changelevel )
-			BF_WriteOneBit( &msg, 1 ); // changelevel
-		else BF_WriteOneBit( &msg, 0 );
+			MSG_WriteOneBit( &msg, 1 ); // changelevel
+		else MSG_WriteOneBit( &msg, 0 );
 	}
 	else
 	{
-		BF_WriteByte( &msg, svc_disconnect );
+		MSG_WriteByte( &msg, svc_disconnect );
 	}
 
 	// send it twice
 	// stagger the packets to crutch operating system limited buffers
 	for( i = 0, cl = svs.clients; i < svgame.globals->maxClients; i++, cl++ )
-		if( cl->state >= cs_connected && !cl->fakeclient )
-			Netchan_Transmit( &cl->netchan, BF_GetNumBytesWritten( &msg ), BF_GetData( &msg ));
+		if( cl->state >= cs_connected && !FBitSet( cl->flags, FCL_FAKECLIENT ) )
+			Netchan_Transmit( &cl->netchan, MSG_GetNumBytesWritten( &msg ), MSG_GetData( &msg ));
 
 	for( i = 0, cl = svs.clients; i < svgame.globals->maxClients; i++, cl++ )
-		if( cl->state >= cs_connected && !cl->fakeclient )
-			Netchan_Transmit( &cl->netchan, BF_GetNumBytesWritten( &msg ), BF_GetData( &msg ));
+		if( cl->state >= cs_connected && !FBitSet( cl->flags, FCL_FAKECLIENT ) )
+			Netchan_Transmit( &cl->netchan, MSG_GetNumBytesWritten( &msg ), MSG_GetData( &msg ));
 }
 
 /*

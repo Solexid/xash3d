@@ -26,15 +26,16 @@ GNU General Public License for more details.
 #include "vgui_draw.h"
 #include "library.h"
 
-#define MAX_TOTAL_CMDS		16
-#define MIN_CMD_RATE		10.0
-#define MAX_CMD_BUFFER		4000
+#define MAX_TOTAL_CMDS		32
+#define MAX_CMD_BUFFER		8000
 #define CONNECTION_PROBLEM_TIME	15.0	// 15 seconds
 
 convar_t	*r_oldparticles;
 convar_t	*rcon_client_password;
 convar_t	*rcon_address;
 
+convar_t    *cl_nosmooth;
+convar_t    *cl_smoothtime;
 convar_t	*cl_timeout;
 convar_t	*cl_predict;
 convar_t	*cl_showfps;
@@ -43,8 +44,6 @@ convar_t	*cl_nodelta;
 convar_t	*cl_crosshair;
 convar_t	*cl_cmdbackup;
 convar_t	*cl_showerror;
-convar_t    *cl_nosmooth;
-convar_t    *cl_smoothtime;
 convar_t	*cl_draw_particles;
 convar_t	*cl_lightstyle_lerping;
 convar_t	*cl_idealpitchscale;
@@ -62,7 +61,7 @@ convar_t	*cl_sprite_nearest;
 convar_t	*cl_updaterate;
 convar_t	*hud_scale;
 convar_t	*cl_maxpacket;
-convar_t    *r_bmodelinterp;
+convar_t    *cl_bmodelinterp;
 
 convar_t	*hud_utf8;
 //
@@ -190,8 +189,8 @@ qboolean CL_ChangeGame( const char *gamefolder, qboolean bReset )
 			clgame.dllFuncs.IN_ActivateMouse();
 
 		// restore mlook state
-		if( mlook_active ) Cmd_ExecuteString( "+mlook\n", src_command );
-		if( jlook_active ) Cmd_ExecuteString( "+jlook\n", src_command );
+		if( mlook_active ) Cmd_ExecuteString( "+mlook\n" );
+		if( jlook_active ) Cmd_ExecuteString( "+jlook\n" );
 		return true;
 	}
 
@@ -210,7 +209,7 @@ static float CL_LerpPoint( void )
 {
 	float	f, frac;
 
-	f = cl.mtime[0] - cl.mtime[1];
+	f = cl_serverframetime();
 	
 	if( !f || SV_Active( ))
 	{
@@ -304,6 +303,87 @@ CLIENT MOVEMENT COMMUNICATION
 =======================================================================
 */
 /*
+===============
+CL_ProcessShowTexturesCmds
+
+navigate around texture atlas
+===============
+*/
+qboolean CL_ProcessShowTexturesCmds( usercmd_t *cmd )
+{
+	static int	oldbuttons;
+	int		changed;
+	int		pressed, released;
+
+	if( !gl_showtextures->integer || gl_overview->integer )
+		return false;
+
+	changed = (oldbuttons ^ cmd->buttons);
+	pressed =  changed & cmd->buttons;
+	released = changed & (~cmd->buttons);
+
+	if( released & ( IN_RIGHT|IN_MOVERIGHT ))
+		Cvar_SetFloat( "r_showtextures", gl_showtextures->integer + 1 );
+	if( released & ( IN_LEFT|IN_MOVELEFT ))
+		Cvar_SetFloat( "r_showtextures", max( 1, gl_showtextures->integer - 1 ));
+	oldbuttons = cmd->buttons;
+
+	return true;
+}
+
+/*
+===============
+CL_ProcessOverviewCmds
+
+Transform user movement into overview adjust
+===============
+*/
+qboolean CL_ProcessOverviewCmds( usercmd_t *cmd )
+{
+	ref_overview_t	*ov = &clgame.overView;
+	int		sign = 1;
+	float		size = world.size[!ov->rotated] / world.size[ov->rotated];
+	float		step = (2.0f / size) * host.realframetime;
+	float		step2 = step * 100.0f * (2.0f / ov->flZoom);
+
+	if( !gl_overview->integer || gl_showtextures->integer )
+		return false;
+
+	if( ov->flZoom < 0.0f ) sign = -1;
+
+	if( cmd->upmove > 0.0f ) ov->zNear += step;
+	else if( cmd->upmove < 0.0f ) ov->zNear -= step;
+
+	if( cmd->buttons & IN_JUMP ) ov->zFar += step;
+	else if( cmd->buttons & IN_DUCK ) ov->zFar -= step;
+
+	if( cmd->buttons & IN_FORWARD ) ov->origin[ov->rotated] -= sign * step2;
+	else if( cmd->buttons & IN_BACK ) ov->origin[ov->rotated] += sign * step2;
+
+	if( ov->rotated )
+	{
+		if( cmd->buttons & ( IN_RIGHT|IN_MOVERIGHT ))
+			ov->origin[0] -= sign * step2;
+		else if( cmd->buttons & ( IN_LEFT|IN_MOVELEFT ))
+			ov->origin[0] += sign * step2;
+	}
+	else
+	{
+		if( cmd->buttons & ( IN_RIGHT|IN_MOVERIGHT ))
+			ov->origin[1] += sign * step2;
+		else if( cmd->buttons & ( IN_LEFT|IN_MOVELEFT ))
+			ov->origin[1] -= sign * step2;
+	}
+
+	if( cmd->buttons & IN_ATTACK ) ov->flZoom += step;
+	else if( cmd->buttons & IN_ATTACK2 ) ov->flZoom -= step;
+
+	if( ov->flZoom == 0.0f ) ov->flZoom = 0.0001f; // to prevent disivion by zero
+
+	return true;
+}
+
+/*
 =================
 CL_CreateCmd
 =================
@@ -315,6 +395,7 @@ void CL_CreateCmd( void )
 	color24		color;
 	vec3_t		angles;
 	qboolean		active;
+	int input_override = 0;
 	int		i, ms;
 
 	ms = host.frametime * 1000;
@@ -340,31 +421,20 @@ void CL_CreateCmd( void )
 		cl.scr_fov = cl.data.fov;
 	}
 
-	// allways dump the first ten messages,
-	// because it may contain leftover inputs
-	// from the last level
-	if( ++cl.movemessages <= 10 )
-	{
-		if( !cls.demoplayback )
-		{
-			cl.refdef.cmd = &cl.commands[cls.netchan.outgoing_sequence & CL_UPDATE_MASK].cmd;
-			*cl.refdef.cmd = cmd;
-		}
-		CL_PopPMStates();
-		return;
-	}
-
 	// message we are constructing.
 	i = cls.netchan.outgoing_sequence & CL_UPDATE_MASK;
 
 	pcmd = &cl.commands[i];
 
-	pcmd->senttime = cls.demoplayback ? 0.0 : host.realtime;
-	memset( &pcmd->cmd, 0, sizeof( pcmd->cmd ));
-	pcmd->receivedtime = -1.0;
-	pcmd->processedfuncs = false;
-	pcmd->heldback = false;
-	pcmd->sendsize = 0;
+	if( !cls.demoplayback )
+	{
+		pcmd->senttime = host.realtime;
+		Q_memset( &pcmd->cmd, 0, sizeof( pcmd->cmd ));
+		pcmd->receivedtime = -1.0;
+		pcmd->processedfuncs = false;
+		pcmd->heldback = false;
+		pcmd->sendsize = 0;
+	}
 
 	active = ( cls.state == ca_active && !cl.refdef.paused && !cls.demoplayback );
 
@@ -375,19 +445,22 @@ void CL_CreateCmd( void )
 	// add motion events from engine controls
 	IN_EngineAppendMove( host.frametime, &cmd, active);
 
-	R_LightForPoint( cl.frame.client.origin, &color, false, false, 128.0f );
-	cmd.lightlevel = (color.r + color.g + color.b) / 3;
+	if( !cls.demoplayback )
+	{
+		R_LightForPoint( cl.frame.client.origin, &color, false, false, 128.0f );
+		cmd.lightlevel = (color.r + color.g + color.b) / 3;
 
-	// never let client.dll calc frametime for player
-	// because is potential backdoor for cheating
-	pcmd->cmd.msec = ms;
-	pcmd->cmd.lerp_msec = cl_interp->value * 1000;
-	pcmd->cmd.lerp_msec = bound( 0, pcmd->cmd.lerp_msec, 250 );
+		// never let client.dll calc frametime for player
+		// because is potential backdoor for cheating
+		pcmd->cmd.msec = ms;
+		pcmd->cmd.lerp_msec = cl_interp->value * 1000;
+		pcmd->cmd.lerp_msec = bound( 0, pcmd->cmd.lerp_msec, 250 );
+	}
 
-	V_ProcessOverviewCmds( &pcmd->cmd );
-	V_ProcessShowTexturesCmds( &pcmd->cmd );
+	input_override |= CL_ProcessOverviewCmds( &pcmd->cmd );
+	input_override |= CL_ProcessShowTexturesCmds( &pcmd->cmd );
 
-	if(( cl.background && !cls.demoplayback ) || gl_overview->integer || cls.changelevel )
+	if(( cl.background && !cls.demoplayback ) || input_override || cls.changelevel )
 	{
 		VectorCopy( angles, cl.refdef.cl_viewangles );
 		VectorCopy( angles, pcmd->cmd.viewangles );
@@ -451,32 +524,35 @@ void CL_WritePacket( void )
 
 	CL_ComputePacketLoss ();
 
-#ifndef _DEBUG
-	if( cl_cmdrate->value < MIN_CMD_RATE )
-	{
-		Cvar_SetFloat( "cl_cmdrate", MIN_CMD_RATE );
-	}
-#endif
 	Q_memset( data, 0, MAX_CMD_BUFFER );
-	BF_Init( &buf, "ClientData", data, sizeof( data ));
+	MSG_Init( &buf, "ClientData", data, sizeof( data ));
 
 	// Determine number of backup commands to send along
 	numbackup = bound( 0, cl_cmdbackup->integer, MAX_BACKUP_COMMANDS );
 	if( cls.state == ca_connected ) numbackup = 0;
 
+	// clamp cmdrate
+	if( cl_cmdrate->integer < 0 ) Cvar_Set( "cl_cmdrate", "0" );
+	else if( cl_cmdrate->integer > 100 ) Cvar_Set( "cl_cmdrate", "100" );
+
 	// Check to see if we can actually send this command
+
+	// always reply at end of frame during connection process
+	if( cls.state > ca_disconnected && cls.state < ca_active )
+		send_command = true;
 
 	// In single player, send commands as fast as possible
 	// Otherwise, only send when ready and when not choking bandwidth
 	if(( cl.maxclients == 1 ) || ( NET_IsLocalAddress( cls.netchan.remote_address ) && !host_limitlocal->integer ))
 		send_command = true;
-	else if(( host.realtime >= cls.nextcmdtime ) && Netchan_CanPacket( &cls.netchan ))
+
+	if(( host.realtime >= cls.nextcmdtime ) && Netchan_CanPacket( &cls.netchan ))
 		send_command = true;
 
-	if( cl.force_send_usercmd )
+	if( cl.send_reply )
 	{
+		cl.send_reply = false;
 		send_command = true;
-		cl.force_send_usercmd = false;
 	}
 
 	if(( cls.netchan.outgoing_sequence - cls.netchan.incoming_acknowledged ) >= CL_UPDATE_MASK )
@@ -489,23 +565,21 @@ void CL_WritePacket( void )
 	}
 
 	if( cl_nodelta->integer )
-	{
 		cl.validsequence = 0;
-	}
 	
 	// send a userinfo update if needed
 	if( userinfo->modified )
 	{
-		BF_WriteByte( &cls.netchan.message, clc_userinfo );
-		BF_WriteString( &cls.netchan.message, Cvar_Userinfo( ));
+		MSG_WriteByte( &cls.netchan.message, clc_userinfo );
+		MSG_WriteString( &cls.netchan.message, Cvar_Userinfo( ));
 	}
 		
 	if( send_command )
 	{
 		int	outgoing_sequence;
 	
-		if( cl_cmdrate->integer > 0 )
-			cls.nextcmdtime = host.realtime + ( 1.0f / cl_cmdrate->value );
+		if( cl_cmdrate->integer > 0 ) // clamped between 10 and 100 fps
+			cls.nextcmdtime = host.realtime + bound( 0.1f, ( 1.0f / cl_cmdrate->value ), 0.01f );
 		else cls.nextcmdtime = host.realtime; // always able to send right away
 
 		if( cls.lastoutgoingcommand == -1 )
@@ -516,17 +590,17 @@ void CL_WritePacket( void )
 		else outgoing_sequence = cls.lastoutgoingcommand + 1;
 
 		// begin a client move command
-		BF_WriteByte( &buf, clc_move );
+		MSG_WriteByte( &buf, clc_move );
 
 		// save the position for a checksum byte
-		key = BF_GetRealBytesWritten( &buf );
-		BF_WriteByte( &buf, 0 );
+		key = MSG_GetRealBytesWritten( &buf );
+		MSG_WriteByte( &buf, 0 );
 
 		// write packet lossage percentation
-		BF_WriteByte( &buf, cls.packet_loss );
+		MSG_WriteByte( &buf, cls.packet_loss );
 
 		// say how many backups we'll be sending
-		BF_WriteByte( &buf, numbackup );
+		MSG_WriteByte( &buf, numbackup );
 
 		// how many real commands have queued up
 		newcmds = ( cls.netchan.outgoing_sequence - cls.lastoutgoingcommand );
@@ -535,7 +609,7 @@ void CL_WritePacket( void )
 		newcmds = bound( 0, newcmds, MAX_TOTAL_CMDS );
 		if( cls.state == ca_connected ) newcmds = 0;
 	
-		BF_WriteByte( &buf, newcmds );
+		MSG_WriteByte( &buf, newcmds );
 
 		numcmds = newcmds + numbackup;
 		from = -1;
@@ -549,12 +623,12 @@ void CL_WritePacket( void )
 			CL_WriteUsercmd( &buf, from, to );
 			from = to;
 
-			if( BF_CheckOverflow( &buf ))
+			if( MSG_CheckOverflow( &buf ))
 				Host_Error( "CL_Move, overflowed command buffer (%i bytes)\n", MAX_CMD_BUFFER );
 		}
 
 		// calculate a checksum over the move commands
-		size = BF_GetRealBytesWritten( &buf ) - key - 1;
+		size = MSG_GetRealBytesWritten( &buf ) - key - 1;
 		buf.pData[key] = CRC32_BlockSequence( buf.pData + key + 1, size, cls.netchan.outgoing_sequence );
 
 		// message we are constructing.
@@ -565,8 +639,8 @@ void CL_WritePacket( void )
 		{
 			cl.delta_sequence = cl.validsequence;
 
-			BF_WriteByte( &buf, clc_delta );
-			BF_WriteByte( &buf, cl.validsequence & 0xFF );
+			MSG_WriteByte( &buf, clc_delta );
+			MSG_WriteByte( &buf, cl.validsequence & 0xFF );
 		}
 		else
 		{
@@ -574,24 +648,22 @@ void CL_WritePacket( void )
 			cl.delta_sequence = -1;
 		}
 
-		if( BF_CheckOverflow( &buf ))
-		{
+		if( MSG_CheckOverflow( &buf ))
 			Host_Error( "CL_Move, overflowed command buffer (%i bytes)\n", MAX_CMD_BUFFER );
-		}
 
 		// remember outgoing command that we are sending
 		cls.lastoutgoingcommand = cls.netchan.outgoing_sequence;
 
 		// update size counter for netgraph
-		cl.commands[cls.netchan.outgoing_sequence & CL_UPDATE_MASK].sendsize = BF_GetNumBytesWritten( &buf );
+		cl.commands[cls.netchan.outgoing_sequence & CL_UPDATE_MASK].sendsize = MSG_GetNumBytesWritten( &buf );
 
 		// composite the rest of the datagram..
-		if( BF_GetNumBitsWritten( &cls.datagram ) <= BF_GetNumBitsLeft( &buf ))
-			BF_WriteBits( &buf, BF_GetData( &cls.datagram ), BF_GetNumBitsWritten( &cls.datagram ));
-		BF_Clear( &cls.datagram );
+		if( MSG_GetNumBitsWritten( &cls.datagram ) <= MSG_GetNumBitsLeft( &buf ))
+			MSG_WriteBits( &buf, MSG_GetData( &cls.datagram ), MSG_GetNumBitsWritten( &cls.datagram ));
+		MSG_Clear( &cls.datagram );
 
 		// deliver the message (or update reliable)
-		Netchan_Transmit( &cls.netchan, BF_GetNumBytesWritten( &buf ), BF_GetData( &buf ));
+		Netchan_Transmit( &cls.netchan, MSG_GetNumBytesWritten( &buf ), MSG_GetData( &buf ));
 	}
 	else
 	{
@@ -680,7 +752,7 @@ void CL_SendConnectPacket( void )
 		return;
 	}
 
-	if( adr.port == 0 ) adr.port = BF_BigShort( PORT_SERVER );
+	if( adr.port == 0 ) adr.port = MSG_BigShort( PORT_SERVER );
 	port = Cvar_VariableValue( "net_qport" );
 
 	userinfo->modified = false;
@@ -732,7 +804,7 @@ void CL_CheckForResend( void )
 		return;
 	}
 
-	if( adr.port == 0 ) adr.port = BF_BigShort( PORT_SERVER );
+	if( adr.port == 0 ) adr.port = MSG_BigShort( PORT_SERVER );
 	cls.connect_time = host.realtime; // for retransmit requests
 
 	MsgDev( D_NOTE, "Connecting to %s...\n", cls.servername );
@@ -764,7 +836,7 @@ void CL_Connect_f( void )
 		userinfo->modified = true;
 	}
 
-	Q_strncpy( server, Cmd_Argv( 1 ), MAX_STRING );
+	Q_strncpy( server, Cmd_Argv( 1 ), sizeof( server ) );
 
 	if( Host_ServerState())
 	{	
@@ -835,7 +907,7 @@ void CL_Rcon_f( void )
 		}
 
 		NET_StringToAdr( rcon_address->string, &to );
-		if( to.port == 0 ) to.port = BF_BigShort( PORT_SERVER );
+		if( to.port == 0 ) to.port = MSG_BigShort( PORT_SERVER );
 	}
 	
 	NET_SendPacket( NS_CLIENT, Q_strlen( message ) + 1, message, to );
@@ -858,12 +930,14 @@ void CL_ClearState( void )
 
 	// wipe the entire cl structure
 	Q_memset( &cl, 0, sizeof( cl ));
-	BF_Clear( &cls.netchan.message );
+	MSG_Clear( &cls.netchan.message );
 	Q_memset( &clgame.fade, 0, sizeof( clgame.fade ));
 	Q_memset( &clgame.shake, 0, sizeof( clgame.shake ));
 	Cvar_FullSet( "cl_background", "0", CVAR_READ_ONLY );
 	cl.refdef.movevars = &clgame.movevars;
 	cl.maxclients = 1; // allow to drawing player in menu
+	cl.mtime[0] = cl.mtime[1] = 1.0f;
+	NetAPI_CancelAllRequests();
 	cl.scr_fov = 90.0f;
 
 	Cvar_SetFloat( "scr_download", 0.0f );
@@ -887,17 +961,17 @@ void CL_SendDisconnectMessage( void )
 
 	if( cls.state == ca_disconnected ) return;
 
-	BF_Init( &buf, "LastMessage", data, sizeof( data ));
-	BF_WriteByte( &buf, clc_stringcmd );
-	BF_WriteString( &buf, "disconnect" );
+	MSG_Init( &buf, "LastMessage", data, sizeof( data ));
+	MSG_WriteByte( &buf, clc_stringcmd );
+	MSG_WriteString( &buf, "disconnect" );
 
 	if( !cls.netchan.remote_address.type )
 		cls.netchan.remote_address.type = NA_LOOPBACK;
 
 	// make sure message will be delivered
-	Netchan_Transmit( &cls.netchan, BF_GetNumBytesWritten( &buf ), BF_GetData( &buf ));
-	Netchan_Transmit( &cls.netchan, BF_GetNumBytesWritten( &buf ), BF_GetData( &buf ));
-	Netchan_Transmit( &cls.netchan, BF_GetNumBytesWritten( &buf ), BF_GetData( &buf ));
+	Netchan_Transmit( &cls.netchan, MSG_GetNumBytesWritten( &buf ), MSG_GetData( &buf ));
+	Netchan_Transmit( &cls.netchan, MSG_GetNumBytesWritten( &buf ), MSG_GetData( &buf ));
+	Netchan_Transmit( &cls.netchan, MSG_GetNumBytesWritten( &buf ), MSG_GetData( &buf ));
 }
 
 /*
@@ -976,7 +1050,7 @@ void CL_LocalServers_f( void )
 	
 	// send a broadcast packet
 	adr.type = NA_BROADCAST;
-	adr.port = BF_BigShort( PORT_SERVER );
+	adr.port = MSG_BigShort( PORT_SERVER );
 
 	Netchan_OutOfBandPrint( NS_CLIENT, adr, "info %i", PROTOCOL_VERSION );
 }
@@ -1001,8 +1075,13 @@ void CL_InternetServers_f( void )
 		MsgDev( D_INFO, "Can't resolve adr: %s\n", sv_master->string );
 		return;
 	}
+	Q_strcpy( &fullquery[22], GI->gamedir );
 
-	NET_SendPacket( NS_CLIENT, sizeof( MS_SCAN_REQUEST ) + Q_strcpy( fullquery + sizeof( MS_SCAN_REQUEST ) - 1, GI->gamedir ), fullquery, adr );
+	NET_SendPacket( NS_CLIENT, Q_strlen( GI->gamedir ) + 23, fullquery, adr );
+
+	if( clgame.master_request != NULL )
+		Q_memset( clgame.master_request, 0, sizeof( net_request_t ));
+	clgame.request_type = NET_REQUEST_GAMEUI;
 }
 
 /*
@@ -1034,11 +1113,11 @@ void CL_Packet_f( void )
 		return;
 	}
 
-	if( !adr.port ) adr.port = BF_BigShort( PORT_SERVER );
+	if( adr.port == 0 ) adr.port = MSG_BigShort( PORT_SERVER );
 
 	in = Cmd_Argv( 2 );
 	out = send + 4;
-	send[0] = send[1] = send[2] = send[3] = (char)0xff;
+	send[0] = send[1] = send[2] = send[3] = (char)0xFF;
 
 	l = Q_strlen( in );
 
@@ -1077,10 +1156,10 @@ void CL_Reconnect_f( void )
 
 		// clear channel and stuff
 		Netchan_Clear( &cls.netchan );
-		BF_Clear( &cls.netchan.message );
+		MSG_Clear( &cls.netchan.message );
 
-		BF_WriteByte( &cls.netchan.message, clc_stringcmd );
-		BF_WriteString( &cls.netchan.message, "new" );
+		MSG_WriteByte( &cls.netchan.message, clc_stringcmd );
+		MSG_WriteString( &cls.netchan.message, "new" );
 
 		cl.validsequence = 0;		// haven't gotten a valid frame update yet
 		cl.delta_sequence = -1;		// we'll request a full delta from the baseline
@@ -1109,6 +1188,70 @@ void CL_Reconnect_f( void )
 
 /*
 =================
+CL_FixupColorStringsForInfoString
+
+all the keys and values must be ends with ^7
+=================
+*/
+void CL_FixupColorStringsForInfoString( const char *in, char *out )
+{
+	qboolean	hasPrefix = false;
+	qboolean	endOfKeyVal = false;
+	int	color = 7;
+	int	count = 0;
+
+	if( *in == '\\' )
+	{
+		*out++ = *in++;
+		count++;
+	}
+
+	while( *in && count < MAX_INFO_STRING )
+	{
+		if( IsColorString( in ))
+			color = ColorIndex( *(in+1));
+
+		// color the not reset while end of key (or value) was found!
+		if( *in == '\\' && color != 7 )
+		{
+			if( IsColorString( out - 2 ))
+			{
+				*(out - 1) = '7';
+			}
+			else
+			{
+				*out++ = '^';
+				*out++ = '7';
+				count += 2;
+			}
+			color = 7;
+		}
+
+		*out++ = *in++;
+		count++;
+	}
+
+	// check the remaining value
+	if( color != 7 )
+	{
+		// if the ends with another color rewrite it
+		if( IsColorString( out - 2 ))
+		{
+			*(out - 1) = '7';
+		}
+		else
+		{
+			*out++ = '^';
+			*out++ = '7';
+			count += 2;
+		}
+	}
+
+	*out = '\0';
+}
+
+/*
+=================
 CL_ParseStatusMessage
 
 Handle a reply from a info
@@ -1116,11 +1259,15 @@ Handle a reply from a info
 */
 void CL_ParseStatusMessage( netadr_t from, sizebuf_t *msg )
 {
+	static char infostring[MAX_INFO_STRING+8];
 	char	*s;
 
-	s = BF_ReadString( msg );
-	MsgDev( D_NOTE, "Got info string: %s\n", s );
-	UI_AddServerToList( from, s );
+	s = MSG_ReadString( msg );
+
+	CL_FixupColorStringsForInfoString( s, infostring );
+
+	MsgDev( D_NOTE, "Server: %s, Game: %s\n", NET_AdrToString( from ), Info_ValueForKey( infostring, "gamedir" ));
+	UI_AddServerToList( from, infostring );
 }
 
 /*
@@ -1130,15 +1277,27 @@ CL_ParseNETInfoMessage
 Handle a reply from a netinfo
 =================
 */
-void CL_ParseNETInfoMessage( netadr_t from, sizebuf_t *msg )
+void CL_ParseNETInfoMessage( netadr_t from, sizebuf_t *msg, const char *s )
 {
-	char		*s;
+	static char infostring[MAX_INFO_STRING+8];
 	net_request_t	*nr;
-	int		i, context, type;
+	int		i, context, type, errorBits;
+	char *val;
 
 	context = Q_atoi( Cmd_Argv( 1 ));
 	type = Q_atoi( Cmd_Argv( 2 ));
-	s = Cmd_Argv( 3 );
+
+	while( *s != '\\' ) s++; // fetching infostring
+
+	// check for errors
+	val = Info_ValueForKey( s, "neterror" );
+
+	if( !Q_stricmp( val, "protocol" ))
+		SetBits( errorBits, NET_ERROR_PROTO_UNSUPPORTED );
+	else if( !Q_stricmp( val, "undefined" ))
+		SetBits( errorBits, NET_ERROR_UNDEFINED );
+
+	CL_FixupColorStringsForInfoString( s, infostring );
 
 	// find a request with specified context
 	for( i = 0; i < MAX_REQUESTS; i++ )
@@ -1147,28 +1306,82 @@ void CL_ParseNETInfoMessage( netadr_t from, sizebuf_t *msg )
 
 		if( nr->resp.context == context && nr->resp.type == type )
 		{
-			if( nr->timeout > host.realtime )
-			{
-				// setup the answer
-				nr->resp.response = s;
-				nr->resp.remote_address = from;
-				nr->resp.error = NET_SUCCESS;
-				nr->resp.ping = host.realtime - nr->timesend;
-				nr->pfnFunc( &nr->resp );
+			// setup the answer
+			nr->resp.response = infostring;
+			nr->resp.remote_address = from;
+			nr->resp.error = NET_SUCCESS;
+			nr->resp.ping = host.realtime - nr->timesend;
 
-				if(!( nr->flags & FNETAPI_MULTIPLE_RESPONSE ))
-					Q_memset( nr, 0, sizeof( *nr )); // done
-			}
-			else
-			{
-				Q_memset( nr, 0, sizeof( *nr )); 
-			}
+			if( nr->timeout <= host.realtime )
+				SetBits( nr->resp.error, NET_ERROR_TIMEOUT );
+			SetBits( nr->resp.error, errorBits ); // misc error bits
+
+			nr->pfnFunc( &nr->resp );
+
+			if( !FBitSet( nr->flags, FNETAPI_MULTIPLE_RESPONSE ))
+			Q_memset( nr, 0, sizeof( *nr )); // done
+
 			return;
 		}
 	}
 }
 
+/*
+=================
+CL_ProcessNetRequests
+
+check for timeouts
+=================
+*/
+void CL_ProcessNetRequests( void )
+{
+	net_request_t	*nr;
+	int		i;
+
+	// find a request with specified context
+	for( i = 0; i < MAX_REQUESTS; i++ )
+	{
+		nr = &clgame.net_requests[i];
+		if( !nr->pfnFunc ) continue;	// not used
+
+		if( nr->timeout <= host.realtime )
+		{
+			// setup the answer
+			SetBits( nr->resp.error, NET_ERROR_TIMEOUT );
+			nr->resp.ping = host.realtime - nr->timesend;
+
+			nr->pfnFunc( &nr->resp );
+			Q_memset( nr, 0, sizeof( *nr )); // done
+		}
+	}
+}
+
 //===================================================================
+/*
+===============
+CL_SetupOverviewParams
+
+Get initial overview values
+===============
+*/
+void CL_SetupOverviewParams( void )
+{
+	ref_overview_t	*ov = &clgame.overView;
+	float		mapAspect, screenAspect, aspect;
+
+	ov->rotated = ( world.size[1] <= world.size[0] ) ? true : false;
+
+	// calculate nearest aspect
+	mapAspect = world.size[!ov->rotated] / world.size[ov->rotated];
+	screenAspect = (float)glState.width / (float)glState.height;
+	aspect = Q_max( mapAspect, screenAspect );
+
+	ov->zNear = world.maxs[2];
+	ov->zFar = world.mins[2];
+	ov->flZoom = ( 8192.0f / world.size[ov->rotated] ) / aspect;
+
+	VectorAverage( world.mins, world.maxs, ov->origin );
+}
 
 /*
 ======================
@@ -1197,25 +1410,6 @@ void CL_PrepSound( void )
 	}
 
 	S_EndRegistration();
-
-	if( host.soundList )
-	{
-		// need to reapply all ambient sounds after restarting
-		for( i = 0; i < host.numsounds; i++)
-		{
-			soundlist_t *entry = &host.soundList[i];
-			if( entry->looping && entry->entnum != -1 )
-			{
-				MsgDev( D_NOTE, "Restarting sound %s...\n", entry->name );
-				S_AmbientSound( entry->origin, entry->entnum,
-					S_RegisterSound( entry->name ), entry->volume, entry->attenuation,
-					entry->pitch, 0 );
-			}
-		}
-	}
-
-	host.soundList = NULL; 
-	host.numsounds = 0;
 
 	cl.audio_prepped = true;
 }
@@ -1274,7 +1468,7 @@ void CL_PrepVideo( void )
 
 	R_NewMap(); // tell the render about new map
 
-	V_SetupOverviewState(); // set overview bounds
+	CL_SetupOverviewParams(); // set overview bounds
 
 	// must be called after lightmap loading!
 	clgame.dllFuncs.pfnVidInit();
@@ -1292,44 +1486,6 @@ void CL_PrepVideo( void )
 	Q_memset( cl.playermodels, 0, sizeof( cl.playermodels ) );
 
 	Cvar_SetFloat( "scr_loading", 100.0f );	// all done
-
-	if( host.decalList )
-	{
-		// need to reapply all decals after restarting
-		for( i = 0; i < host.numdecals; i++ )
-		{
-			decallist_t *entry = &host.decalList[i];
-			cl_entity_t *pEdict = CL_GetEntityByIndex( entry->entityIndex );
-			int decalIndex = CL_DecalIndex( CL_DecalIndexFromName( entry->name ));
-			int modelIndex = 0;
-
-			if( pEdict ) modelIndex = pEdict->curstate.modelindex;
-			CL_DecalShoot( decalIndex, entry->entityIndex, modelIndex, entry->position, entry->flags );
-		}
-		Z_Free( host.decalList );
-	}
-
-	host.decalList = NULL; 
-	host.numdecals = 0;
-
-	if( host.soundList )
-	{
-		// need to reapply all ambient sounds after restarting
-		for( i = 0; i < host.numsounds; i++ )
-		{
-			soundlist_t *entry = &host.soundList[i];
-			if( entry->looping && entry->entnum != -1 )
-			{
-				MsgDev( D_NOTE, "Restarting sound %s...\n", entry->name );
-				S_AmbientSound( entry->origin, entry->entnum,
-				S_RegisterSound( entry->name ), entry->volume, entry->attenuation,
-				entry->pitch, 0 );
-			}
-		}
-	}
-
-	host.soundList = NULL; 
-	host.numsounds = 0;
 	
 	if( host.developer <= 2 )
 		Con_ClearNotify(); // clear any lines of console text
@@ -1354,10 +1510,10 @@ void CL_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	int	len = sizeof( buf ), i = 0;
 	netadr_t servadr;
 	
-	BF_Clear( msg );
-	BF_ReadLong( msg ); // skip the -1
+	MSG_Clear( msg );
+	MSG_ReadLong( msg ); // skip the -1
 
-	args = BF_ReadStringLine( msg );
+	args = MSG_ReadStringLine( msg );
 
 	Cmd_TokenizeString( args );
 	c = Cmd_Argv( 0 );
@@ -1396,8 +1552,8 @@ void CL_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 			cls.netchan.compress = true;
 		}
 
-		BF_WriteByte( &cls.netchan.message, clc_stringcmd );
-		BF_WriteString( &cls.netchan.message, "new" );
+		MSG_WriteByte( &cls.netchan.message, clc_stringcmd );
+		MSG_WriteString( &cls.netchan.message, "new" );
 		cls.state = ca_connected;
 
 		cl.validsequence = 0;		// haven't gotten a valid frame update yet
@@ -1416,7 +1572,7 @@ void CL_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	else if( !Q_strcmp( c, "netinfo" ))
 	{
 		// server responding to a status broadcast
-		CL_ParseNETInfoMessage( from, msg );
+		CL_ParseNETInfoMessage( from, msg, args );
 	}
 	else if( !Q_strcmp( c, "cmd" ))
 	{
@@ -1429,14 +1585,14 @@ void CL_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 #ifdef XASH_SDL
 		SDL_RestoreWindow( host.hWnd );
 #endif
-		args = BF_ReadString( msg );
+		args = MSG_ReadString( msg );
 		Cbuf_AddText( args );
 		Cbuf_AddText( "\n" );
 	}
 	else if( !Q_strcmp( c, "print" ))
 	{
 		// print command from somewhere
-		char *str = BF_ReadString( msg );
+		char *str = MSG_ReadString( msg );
 		Msg("^5r:^7%s", str );
 
 		if( str[0] == 0 || str[ Q_strlen( str ) - 1 ] != '\n' )
@@ -1469,22 +1625,63 @@ void CL_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	else if( !Q_strcmp( c, "f") )
 	{
 		// serverlist got from masterserver
-		while( !msg->bOverflow )
+		while( MSG_GetNumBitsLeft( msg ) > 0 )
 		{
+			MSG_ReadBytes( msg, servadr.ip, sizeof( servadr.ip ));	// 4 bytes for IP
+			servadr.port = MSG_ReadShort( msg );			// 2 bytes for Port
 			servadr.type = NA_IP;
-			// 4 bytes for IP
-			BF_ReadBytes( msg, servadr.ip, sizeof( servadr.ip ));
-			// 2 bytes for Port
-			servadr.port = BF_ReadShort( msg );
 
 			if( !servadr.port )
+			{
+				if( clgame.request_type == NET_REQUEST_CLIENT && clgame.master_request != NULL )
+				{
+					net_request_t	*nr = clgame.master_request;
+					net_adrlist_t	*list, **prev;
+
+					// setup the answer
+					nr->resp.remote_address = from;
+					nr->resp.error = NET_SUCCESS;
+					nr->resp.ping = host.realtime - nr->timesend;
+
+					if( nr->timeout <= host.realtime )
+						SetBits( nr->resp.error, NET_ERROR_TIMEOUT );
+					MsgDev( D_INFO, "serverlist call: %s\n", NET_AdrToString( from ));
+					nr->pfnFunc( &nr->resp );
+					// throw the list, now it will be stored in user area
+					prev = (net_adrlist_t **)&nr->resp.response;
+
+					while( 1 )
+					{
+						list = *prev;
+						if( !list ) break;
+
+						// throw out any variables the game created
+						*prev = list->next;
+						Mem_Free( list );
+					}
+					Q_memset( nr, 0, sizeof( *nr )); // done
+					clgame.request_type = NET_REQUEST_CANCEL;
+					clgame.master_request = NULL;
+				}
 				break;
+			}
 
-			MsgDev( D_INFO, "Found server: %s\n", NET_AdrToString( servadr ));
+			if( clgame.request_type == NET_REQUEST_CLIENT && clgame.master_request != NULL )
+			{
+				net_request_t *nr = clgame.master_request;
+				net_adrlist_t *list;
 
-			NET_Config( true ); // allow remote
-
-			Netchan_OutOfBandPrint( NS_CLIENT, servadr, "info %i", PROTOCOL_VERSION );
+				// adding addresses into list
+				list = Z_Malloc( sizeof( *list ));
+				list->remote_address = servadr;
+				list->next = nr->resp.response;
+				nr->resp.response = list;
+			}
+			else
+			{
+				NET_Config( true ); // allow remote
+				Netchan_OutOfBandPrint( NS_CLIENT, servadr, "info %i", PROTOCOL_VERSION );
+			}
 		}
 
 		// execute at next frame preventing relation on fps
@@ -1531,10 +1728,10 @@ void CL_ReadNetMessage( void )
 			if( !NetSplit_GetLong( &cls.netchan.netsplit, &net_from, net_message_buffer, &curSize ) )
 				continue;
 
-		BF_Init( &net_message, "ServerData", net_message_buffer, curSize );
+		MSG_Init( &net_message, "ServerData", net_message_buffer, curSize );
 
 		// check for connectionless packet (0xffffffff) first
-		if( BF_GetMaxBytes( &net_message ) >= 4 && *(int *)net_message.pData == -1 )
+		if( MSG_GetMaxBytes( &net_message ) >= 4 && *(int *)net_message.pData == -1 )
 		{
 			CL_ConnectionlessPacket( net_from, &net_message );
 			continue;
@@ -1543,7 +1740,7 @@ void CL_ReadNetMessage( void )
 		// can't be a valid sequenced packet	
 		if( cls.state < ca_connected ) continue;
 
-		if( BF_GetMaxBytes( &net_message ) < 8 )
+		if( MSG_GetMaxBytes( &net_message ) < 8 )
 		{
 			MsgDev( D_WARN, "%s: runt packet\n", NET_AdrToString( net_from ));
 			continue;
@@ -1560,13 +1757,14 @@ void CL_ReadNetMessage( void )
 			continue;	// wasn't accepted for some reason
 
 		CL_ParseServerMessage( &net_message );
+		cl.send_reply = true;
 	}
 
 	// check for fragmentation/reassembly related packets.
 	if( cls.state != ca_disconnected && Netchan_IncomingReady( &cls.netchan ))
 	{
 		// the header is different lengths for reliable and unreliable messages
-		int headerBytes = BF_GetNumBytesRead( &net_message );
+		int headerBytes = MSG_GetNumBytesRead( &net_message );
 
 		// process the incoming buffer(s)
 		if( Netchan_CopyNormalFragments( &cls.netchan, &net_message ))
@@ -1582,6 +1780,9 @@ void CL_ReadNetMessage( void )
 	}
 
 	Netchan_UpdateProgress( &cls.netchan );
+
+	// check requests for time-expire
+	CL_ProcessNetRequests();
 }
 
 void CL_ReadPackets( void )
@@ -1598,6 +1799,9 @@ void CL_ReadPackets( void )
 		Cvar_SetCheatState();
 #endif
 	CL_UpdateFrameLerp ();
+
+	// build list of all solid entities per next frame(exclude clients)
+	CL_SetSolidEntities();
 
 	// singleplayer never has connection timeout
 	if( NET_IsLocalAddress( cls.netchan.remote_address ))
@@ -1640,8 +1844,8 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 	{
 		MsgDev( D_INFO, "Download completed, resuming connection\n" );
 		FS_Rescan();
-		BF_WriteByte( &cls.netchan.message, clc_stringcmd );
-		BF_WriteString( &cls.netchan.message, "continueloading" );
+		MSG_WriteByte( &cls.netchan.message, clc_stringcmd );
+		MSG_WriteString( &cls.netchan.message, "continueloading" );
 		cls.downloadfileid = 0;
 		cls.downloadcount = 0;
 		return;
@@ -1694,8 +1898,8 @@ void CL_Precache_f( void )
 
 	Cvar_SetCheatState( false );
 
-	BF_WriteByte( &cls.netchan.message, clc_stringcmd );
-	BF_WriteString( &cls.netchan.message, va( "begin %i\n", spawncount ));
+	MSG_WriteByte( &cls.netchan.message, clc_stringcmd );
+	MSG_WriteString( &cls.netchan.message, va( "begin %i\n", spawncount ));
 }
 
 /*
@@ -1728,7 +1932,7 @@ void CL_InitLocal( void )
 	cls.state = ca_disconnected;
 
 	// register our variables
-	cl_predict = Cvar_Get( "cl_predict", "0", CVAR_ARCHIVE, "enable client movement prediction" );
+	cl_predict = Cvar_Get( "cl_predict", "0", CVAR_ARCHIVE|CVAR_USERINFO, "enable client movement prediction" );
 	cl_crosshair = Cvar_Get( "crosshair", "1", CVAR_ARCHIVE, "show weapon chrosshair" );
 	cl_nodelta = Cvar_Get ("cl_nodelta", "0", 0, "disable delta-compression for usercommands" );
 	cl_idealpitchscale = Cvar_Get( "cl_idealpitchscale", "0.8", 0, "how much to look up/down slopes and stairs when not using freelook" );
@@ -1771,7 +1975,7 @@ void CL_InitLocal( void )
 	cl_updaterate = Cvar_Get( "cl_updaterate", "60", CVAR_USERINFO|CVAR_ARCHIVE, "refresh rate of server messages" );
 	cl_nosmooth = Cvar_Get( "cl_nosmooth", "0", CVAR_ARCHIVE, "smooth up stair climbing and interpolate position in multiplayer" );
 	cl_smoothtime = Cvar_Get( "cl_smoothtime", "0.1", CVAR_ARCHIVE, "time to smooth up" );
-	r_bmodelinterp = Cvar_Get( "r_bmodelinterp", "1", 0, "enable bmodel interpolation" );
+	cl_bmodelinterp = Cvar_Get( "r_bmodelinterp", "1", 0, "enable bmodel interpolation" );
 
 	hud_scale = Cvar_Get( "hud_scale", "0", CVAR_ARCHIVE|CVAR_LATCH, "scale hud at current resolution" );
 	hud_utf8 = Cvar_Get( "hud_utf8", "0", CVAR_ARCHIVE, "Use utf-8 encoding for hud text" );
@@ -1865,6 +2069,42 @@ void CL_SendCommand( void )
 	// resend a connection request if necessary
 	CL_CheckForResend ();
 }
+/*
+==================
+CL_PrepareFrame
+
+setup camera, update visible ents
+==================
+*/
+void CL_PrepareFrame( void )
+{
+	if( cls.state != ca_active )
+		return; // not in game
+
+	if( !cl.video_prepped || ( UI_IsVisible() && !cl.background ))
+		return; // still loading
+
+	if( cl.frame.valid && ( cl.force_refdef || !cl.refdef.paused ))
+	{
+		cl.force_refdef = false;
+		V_SetupRefDef ();
+	}
+}
+
+/*
+==================
+Host_RenderFrame
+
+==================
+*/
+void Host_RenderFrame( void )
+{
+	// if client is not active, do nothing
+	if( !cls.initialized ) return;
+
+	// update the screen
+	SCR_UpdateScreen ();
+}
 
 /*
 ==================
@@ -1880,13 +2120,17 @@ void Host_ClientFrame( void )
 	cl.oldtime = cl.time;
 	cl.time += host.frametime;
 
-	if( menu.hInstance )
+	// demo time
+	if( cls.demorecording && !cls.demowaiting )
+		cls.demotime += host.frametime;
+
+	if( gameui.hInstance )
 	{
 		// menu time (not paused, not clamped)
-		menu.globals->time = host.realtime;
-		menu.globals->frametime = host.realframetime;
-		menu.globals->demoplayback = cls.demoplayback;
-		menu.globals->demorecording = cls.demorecording;
+		gameui.globals->time = host.realtime;
+		gameui.globals->frametime = host.realframetime;
+		gameui.globals->demoplayback = cls.demoplayback;
+		gameui.globals->demorecording = cls.demorecording;
 	}
 
 #ifdef XASH_VGUI
@@ -1910,10 +2154,25 @@ void Host_ClientFrame( void )
 		}
 	
 	}
-	// update the screen
-	SCR_UpdateScreen ();
-	if( cls.initialized )
+	if( FBitSet( host.features, ENGINE_FIXED_FRAMERATE ))
 	{
+		// send a new command message to server
+		CL_SendCommand();
+
+		// predict all unacknowledged movements
+		CL_PredictMovement();
+
+		// setup view, add visible ents
+		CL_PrepareFrame();
+
+		// update audio
+		S_RenderFrame( &cl.refdef );
+	}
+	else
+	{
+		// update the screen
+		SCR_UpdateScreen();
+
 		// update audio
 		S_RenderFrame( &cl.refdef );
 
@@ -1922,16 +2181,16 @@ void Host_ClientFrame( void )
 
 		// predict all unacknowledged movements
 		CL_PredictMovement();
-
-		// decay dynamic lights
-		CL_DecayLights ();
-
-		SCR_RunCinematic();
 	}
 
-	Con_RunConsole();
+	// update lightstyles
+	CL_RunLightStyles();
 
-	cls.framecount++;
+	// decay dynamic lights
+	CL_DecayLights ();
+
+	SCR_RunCinematic();
+	Con_RunConsole();
 }
 
 
@@ -1958,7 +2217,7 @@ void CL_Init( void )
 	S_Init();	// init sound
 
 	// unreliable buffer. unsed for unreliable commands and voice stream
-	BF_Init( &cls.datagram, "cls.datagram", cls.datagram_buf, sizeof( cls.datagram_buf ));
+	MSG_Init( &cls.datagram, "cls.datagram", cls.datagram_buf, sizeof( cls.datagram_buf ));
 
 	IN_TouchInit();
 #if TARGET_OS_IPHONE

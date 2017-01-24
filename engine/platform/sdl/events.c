@@ -324,7 +324,6 @@ void SDLash_EventFilter( void *ev )
 
 	case SDL_WINDOWEVENT:
 		if( ( host.state == HOST_SHUTDOWN ) ||
-			( host.state == HOST_RESTART )  ||
 			( host.type  == HOST_DEDICATED ) )
 			break; // no need to activate
 		switch( event->window.event )

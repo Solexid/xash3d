@@ -38,7 +38,7 @@ GNU General Public License for more details.
 #define MAX_CDTRACKS	32
 #define MAX_IMAGES		256	// SpriteTextures
 #define MAX_EFRAGS		4096
-#define MAX_REQUESTS	32
+#define MAX_REQUESTS	64
 
 // screenshot types
 #define VID_SCREENSHOT	0
@@ -71,12 +71,12 @@ typedef struct frame_s
 	clientdata_t	client;		// local client private data
 	entity_state_t	playerstate[MAX_CLIENTS];
 	weapon_data_t	weapondata[64];
+	netbandwidthgraph_t graphdata;
 
 	int		num_entities;
 	int		first_entity;	// into the circular cl_packet_entities[]
 
 	qboolean		valid;		// cleared if delta parsing was invalid
-	netbandwidthgraph_t graphdata;
 } frame_t;
 
 typedef struct runcmd_s
@@ -92,6 +92,9 @@ typedef struct runcmd_s
 	int		sendsize;
 } runcmd_t;
 
+#define ANGLE_BACKUP 16
+#define ANGLE_MASK (ANGLE_BACKUP - 1)
+
 #define CMD_BACKUP		MULTIPLAYER_BACKUP	// allow a lot of command backups for very fast systems
 #define CMD_MASK		(CMD_BACKUP - 1)
 
@@ -100,8 +103,11 @@ extern int CL_UPDATE_BACKUP;
 
 #define INVALID_HANDLE	0xFFFF		// for XashXT cache system
 
+#define cl_serverframetime() (cl.mtime[0] - cl.mtime[1])
+#define cl_clientframetime() (host.frametime)
+
 // used by SetUpPlayerPrediction
-#if 0
+#if 1
 typedef struct
 {
 	int movetype;
@@ -155,9 +161,10 @@ typedef struct
 	int		last_command_ack;
 	int		last_incoming_sequence;
 
-	qboolean		force_send_usercmd;
+	qboolean		send_reply;
 	qboolean		thirdperson;
 	qboolean		background;		// not real game, just a background
+	qboolean		first_frame;	// first rendering frame
 
 	uint		checksum;			// for catching cheater maps
 
@@ -205,7 +212,7 @@ typedef struct
 	int weaponseq;
 	int     scr_fov;
 	model_t *playermodels[32];
-#if 0 // used by SetUpPlayerPrediction
+#if 1 // used by SetUpPlayerPrediction
 	predicted_player_t predicted_players[MAX_CLIENTS];
 #endif
 } client_t;
@@ -350,6 +357,13 @@ typedef struct
 	model_t		*model;		// for catch model changes
 } remap_info_t;
 
+typedef enum
+{
+	NET_REQUEST_CANCEL = 0,	// request was cancelled for some reasons
+	NET_REQUEST_GAMEUI,		// called from GameUI
+	NET_REQUEST_CLIENT		// called from Client
+} net_request_type_t;
+
 typedef struct
 {
 	net_response_t		resp;
@@ -385,7 +399,6 @@ typedef struct
 	movevars_t           oldmovevars;
 	playermove_t         *pmove;                     // pmove state
 
-	//int                old_trace_hull;             // used by PM_Push\Pop state
 	qboolean             pushed;                     // used by PM_Push\Pop state
 	int                  oldviscount;                // used by PM_Push\Pop state
 	int                  oldphyscount;               // used by PM_Push\Pop state
@@ -412,7 +425,9 @@ typedef struct
 	client_textmessage_t *titles;                    // title messages, not network messages
 	int                  numTitles;
 
+	net_request_type_t   request_type;
 	net_request_t        net_requests[MAX_REQUESTS]; // no reason to keep more
+	net_request_t        *master_request;
 
 	efrag_t              *free_efrags;               // linked efrags
 	cl_entity_t          viewent;                    // viewmodel
@@ -438,7 +453,7 @@ typedef struct
 	int		logo_yres;
 	float		logo_length;
 	qboolean	use_text_api;
-} menu_static_t;
+} gameui_static_t;
 
 typedef struct
 {
@@ -460,7 +475,6 @@ typedef struct
 
 	byte		*mempool;			// client premamnent pool: edicts etc
 	
-	int		framecount;
 	int		quakePort;		// a 16 bit value that allows quake servers
 						// to work around address translating routers
 						// g-cont. this port allow many copies of engine in multiplayer game
@@ -539,7 +553,7 @@ extern "C" {
 extern client_t		cl;
 extern client_static_t	cls;
 extern clgame_static_t	clgame;
-extern menu_static_t	menu;
+extern gameui_static_t	gameui;
 
 #ifdef __cplusplus
 }
@@ -577,7 +591,8 @@ extern convar_t *cl_trace_stufftext;
 extern convar_t *cl_trace_messages;
 extern convar_t	*cl_sprite_nearest;
 extern convar_t *cl_updaterate;
-extern convar_t *r_bmodelinterp;
+extern convar_t *cl_bmodelinterp;
+extern convar_t *gl_showtextures;
 extern convar_t *hud_scale;
 extern convar_t	*scr_centertime;
 extern convar_t	*scr_viewsize;
@@ -641,6 +656,7 @@ void CL_WriteDemoUserCmd( int cmdnumber );
 void CL_WriteDemoMessage( qboolean startup, int start, sizebuf_t *msg );
 void CL_WriteDemoUserMessage( const byte *buffer, size_t size );
 qboolean CL_DemoReadMessage( byte *buffer, size_t *length );
+void CL_DemoInterpolateAngles( void );
 void CL_WriteDemoJumpTime( void );
 void CL_CloseDemoHeader( void );
 void CL_StopPlayback( void );
@@ -688,6 +704,7 @@ void CL_TextMessageParse( byte *pMemFile, int fileSize );
 client_textmessage_t *CL_TextMessageGet( const char *pName );
 int pfnDecalIndexFromName( const char *szDecalName );
 int pfnIndexFromTrace( struct pmtrace_s *pTrace );
+void NetAPI_CancelAllRequests( void );
 int CL_FindModelIndex( const char *m );
 HSPRITE pfnSPR_Load( const char *szPicName );
 HSPRITE pfnSPR_LoadExt( const char *szPicName, uint texFlags );
@@ -738,7 +755,7 @@ void SCR_MakeScreenShot( void );
 void SCR_MakeLevelShot( void );
 void SCR_NetSpeeds( void );
 void SCR_RSpeeds( void );
-void SCR_DrawFPS( void );
+void SCR_DrawFPS(int height );
 void SCR_DrawPos( void );
 void SCR_DrawNetGraph( void );
 
@@ -751,11 +768,7 @@ void V_Shutdown( void );
 qboolean V_PreRender( void );
 void V_PostRender( void );
 void V_RenderView( void );
-void V_SetupOverviewState( void );
-void V_ProcessOverviewCmds( usercmd_t *cmd );
-void V_MergeOverviewRefdef( ref_params_t *fd );
-void V_ProcessShowTexturesCmds( usercmd_t *cmd );
-void V_WriteOverviewScript( void );
+void V_SetupRefDef( void );
 
 //
 // cl_pmove.c
@@ -833,6 +846,7 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType );
 void CL_RegisterMuzzleFlashes( void );
 void CL_ReadPointFile_f( void );
 void CL_ReadLineFile_f( void );
+void CL_RunLightStyles( void );
 
 //
 // console.c
@@ -841,6 +855,7 @@ extern convar_t *con_fontsize;
 qboolean Con_Visible( void );
 void Con_Init( void );
 void Con_VidInit( void );
+void Con_Shutdown( void );
 void Con_ToggleConsole_f( void );
 void Con_ClearNotify( void );
 void Con_DrawDebug( void );
@@ -862,7 +877,7 @@ void Con_CharEvent( int key );
 void Con_RestoreFont( void );
 void Key_Console( int key );
 void Key_Message( int key );
-void Con_Close( void );
+void Con_FastClose( void );
 void Con_PageUp( int lines );
 void Con_PageDown( int lines );
 void Con_Bottom( void );
@@ -889,7 +904,7 @@ void S_RenderFrame( struct ref_params_s *fd );
 void S_ExtraUpdate( void );
 
 //
-// cl_menu.c
+// cl_gameui.c
 //
 void UI_UnloadProgs( void );
 qboolean UI_LoadProgs( void );

@@ -406,9 +406,9 @@ qboolean _Sys_GetParmFromCmdLine( char *parm, char *out, size_t size )
 {
 	int	argc = Sys_CheckParm( parm );
 
-	if( !argc ) return false;
-	if( !out ) return false;	
-	if( !host.argv[argc + 1] ) return false;
+	if( !argc || !out || !host.argv[argc + 1] )
+		return false;
+
 	Q_strncpy( out, host.argv[argc+1], size );
 
 	return true;
@@ -702,8 +702,8 @@ void Sys_Print( const char *pMsg )
 
 	{
 		const char	*msg;
-		char		buffer[32768];
-		char		logbuf[32768];
+		char		buffer[MAX_PRINT_MSG];
+		char		logbuf[MAX_PRINT_MSG];
 		char		*b = buffer;
 		char		*c = logbuf;
 		int		i = 0;
@@ -718,8 +718,7 @@ void Sys_Print( const char *pMsg )
 			if( msg[i] == '\n' && msg[i+1] == '\r' )
 			{
 				b[0] = '\r';
-				b[1] = '\n';
-				c[0] = '\n';
+				b[1] = c[0] = '\n';
 				b += 2, c++;
 				i++;
 			}
@@ -732,8 +731,7 @@ void Sys_Print( const char *pMsg )
 			else if( msg[i] == '\n' )
 			{
 				b[0] = '\r';
-				b[1] = '\n';
-				c[0] = '\n';
+				b[1] = c[0] = '\n';
 				b += 2, c++;
 			}
 			else if( msg[i] == '\35' || msg[i] == '\36' || msg[i] == '\37' )
@@ -752,7 +750,7 @@ void Sys_Print( const char *pMsg )
 			i++;
 		}
 
-		*b = *c = 0; // cutoff garbage
+		*b = *c = 0; // terminator
 
 		Sys_PrintLog( logbuf );
 		Wcon_Print( buffer );
@@ -773,7 +771,7 @@ formatted message
 void Msg( const char *pMsg, ... )
 {
 	va_list	argptr;
-	char	text[8192];
+	char	text[MAX_PRINT_MSG];
 	
 	va_start( argptr, pMsg );
 	Q_vsnprintf( text, sizeof( text ), pMsg, argptr );
@@ -792,7 +790,7 @@ formatted developer message
 void MsgDev( int level, const char *pMsg, ... )
 {
 	va_list	argptr;
-	char	text[8192];
+	char	text[MAX_PRINT_MSG];
 
 	if( host.developer < level ) return;
 
@@ -810,7 +808,7 @@ void MsgDev( int level, const char *pMsg, ... )
 		break;
 	case D_INFO:
 	case D_NOTE:
-	case D_AICONSOLE:
+	case D_REPORT:
 		Sys_Print( text );
 		break;
 	}

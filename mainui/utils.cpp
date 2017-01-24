@@ -83,6 +83,30 @@ int ColorStrlen( const char *str )
 	return len;
 }
 
+int ColorPrexfixCount( const char *str )
+{
+	const char *p;
+
+	if( !str )
+		return 0;
+
+	int len = 0;
+	p = str;
+
+	while( *p )
+	{
+		if( IsColorString( p ))
+		{
+			len += 2;
+			p += 2;
+			continue;
+		}
+		p++;
+	}
+
+	return len;
+}
+
 void StringConcat( char *dst, const char *src, size_t size )
 {
 	register char *d = dst;
@@ -2359,6 +2383,7 @@ void UI_PicButton_Draw( menuPicButton_s *item )
 		};
 
 		PIC_Set( item->pic, r, g, b, 255 );
+		PIC_EnableScissor( item->generic.x, item->generic.y, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height - 2 );
 		PIC_DrawAdditive( item->generic.x, item->generic.y, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height, &rects[state] );
 
 		a = (512 - (uiStatic.realTime - item->generic.lastFocusTime)) >> 1;
@@ -2368,6 +2393,7 @@ void UI_PicButton_Draw( menuPicButton_s *item )
 			PIC_Set( item->pic, r, g, b, a );
 			PIC_DrawAdditive( item->generic.x, item->generic.y, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height, &rects[BUTTON_FOCUS] );
 		}
+		PIC_DisableScissor();
 	}
 	else
 	{

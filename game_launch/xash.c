@@ -50,7 +50,9 @@ GNU General Public License for more details.
  #else
   #define XASHLIB                 "xash_dedicated.dll"
  #endif
- #include "windows.h" 
+ #include "windows.h"
+ // enable NVIDIA High Performance Graphics while using Integrated Graphics.
+ __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 #endif
 
 #define GAME_PATH	"valve"	// default dir to start from

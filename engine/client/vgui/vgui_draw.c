@@ -409,9 +409,9 @@ enum VGUI_KeyCode VGUI_MapKey( int keyCode )
 {
 	VGUI_InitKeyTranslationTable();
 
-	if( keyCode < 0 || keyCode >= sizeof( s_pVirtualKeyTrans ) / sizeof( s_pVirtualKeyTrans[0] ))
+	if( keyCode < 0 || keyCode >= ARRAYSIZE( s_pVirtualKeyTrans ) )
 	{
-		//Assert( false );
+		Assert( 0 );
 		return (enum VGUI_KeyCode)-1;
 	}
 	else
@@ -530,7 +530,7 @@ generate unique texture number
 int GAME_EXPORT VGUI_GenerateTexture( void )
 {
 	if( ++g_textureId >= VGUI_MAX_TEXTURES )
-		Sys_Error( "VGUI_GenerateTexture: VGUI_MAX_TEXTURES limit exceeded\n" );
+		Host_Error( "VGUI_GenerateTexture: VGUI_MAX_TEXTURES limit exceeded\n" );
 	return g_textureId;
 }
 
@@ -563,7 +563,6 @@ void GAME_EXPORT VGUI_UploadTexture( int id, const char *buffer, int width, int 
 	r_image.buffer = (byte *)buffer;
 
 	g_textures[id] = GL_LoadTextureInternal( texName, &r_image, TF_IMAGE, false );
-	GL_SetTextureType( g_textures[id], TEX_VGUI );
 	g_iBoundTexture = id;
 }
 
@@ -596,7 +595,6 @@ void GAME_EXPORT VGUI_CreateTexture( int id, int width, int height )
 	r_image.buffer = NULL;
 
 	g_textures[id] = GL_LoadTextureInternal( texName, &r_image, TF_IMAGE|TF_NEAREST, false );
-	GL_SetTextureType( g_textures[id], TEX_VGUI );
 	g_iBoundTexture = id;
 }
 
@@ -698,7 +696,8 @@ generic method to fill rectangle
 */
 void GAME_EXPORT VGUI_DrawQuad( const vpoint_t *ul, const vpoint_t *lr )
 {
-	ASSERT( ul != NULL && lr != NULL );
+	ASSERT( ul != NULL );
+	ASSERT( lr != NULL );
 
 	pglBegin( GL_QUADS );
 		pglTexCoord2f( ul->coord[0], ul->coord[1] );

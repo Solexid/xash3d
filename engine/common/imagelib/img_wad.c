@@ -58,6 +58,7 @@ qboolean Image_LoadPAL( const char *name, const byte *buffer, size_t filesize )
 	image.rgba = NULL;	// only palette, not real image
 	image.size = 1024;	// expanded palette
 	image.width = image.height = 0;
+	image.depth = 1;
 	
 	return true;
 }
@@ -119,6 +120,7 @@ qboolean Image_LoadFNT( const char *name, const byte *buffer, size_t filesize )
 	}
 
 	image.type = PF_INDEXED_32;	// 32-bit palette
+	image.depth = 1;
 
 	return Image_AddIndexedImageToPack( fin, image.width, image.height );
 }
@@ -185,6 +187,7 @@ qboolean Image_LoadMDL( const char *name, const byte *buffer, size_t filesize )
 	}
 
 	image.type = PF_INDEXED_32;	// 32-bit palete
+	image.depth = 1;
 
 	return Image_AddIndexedImageToPack( fin, image.width, image.height );
 }
@@ -268,24 +271,12 @@ qboolean Image_LoadLMP( const char *name, const byte *buffer, size_t filesize )
 	if( Q_stristr( name, "palette.lmp" ))
 		return Image_LoadPAL( name, buffer, filesize );
 
-	// greatest hack from id software
-	if( image.hint != IL_HINT_HL && Q_stristr( name, "conchars" ))
-	{
-		image.width = image.height = 128;
-		image.flags |= IMAGE_HAS_ALPHA;
-		rendermode = LUMP_QFONT;
-		filesize += sizeof(lmp);
-		fin = (byte *)buffer;
-	}
-	else
-	{
-		fin = (byte *)buffer;
-		Q_memcpy( &lmp, fin, sizeof( lmp ));
-		image.width = lmp.width;
-		image.height = lmp.height;
-		rendermode = LUMP_NORMAL;
-		fin += sizeof(lmp);
-	}
+	fin = (byte *)buffer;
+	Q_memcpy( &lmp, fin, sizeof( lmp ));
+	image.width = lmp.width;
+	image.height = lmp.height;
+	rendermode = LUMP_NORMAL;
+	fin += sizeof(lmp);
 
 	pixels = image.width * image.height;
 
@@ -320,6 +311,7 @@ qboolean Image_LoadLMP( const char *name, const byte *buffer, size_t filesize )
 	if( fin[0] == 255 ) image.flags |= IMAGE_HAS_ALPHA;
 	Image_GetPaletteLMP( pal, rendermode );
 	image.type = PF_INDEXED_32; // 32-bit palete
+	image.depth = 1;
 
 	return Image_AddIndexedImageToPack( fin, image.width, image.height );
 }
@@ -336,6 +328,7 @@ qboolean Image_LoadMIP( const char *name, const byte *buffer, size_t filesize )
 	byte	*fin, *pal;
 	int	ofs[4], rendermode;
 	int	i, pixels, numcolors;
+	int reflectivity[3] = { 0 };
 
 	if( filesize < sizeof( mip ))
 	{
@@ -477,7 +470,20 @@ qboolean Image_LoadMIP( const char *name, const byte *buffer, size_t filesize )
 		// calc the decal reflectivity
 		image.fogParams[3] = VectorAvg( image.fogParams );         
 	}
+	else if( pal != NULL )
+	{
+		for( i = 0; i < 256; i++ )
+		{
+			reflectivity[0] += pal[i * 3 + 0];
+			reflectivity[1] += pal[i * 3 + 1];
+			reflectivity[2] += pal[i * 3 + 2];
+		}
+
+		VectorDivide( reflectivity, 256, image.fogParams );
+	}
  
 	image.type = PF_INDEXED_32;	// 32-bit palete
+	image.depth = 1;
+
 	return Image_AddIndexedImageToPack( fin, image.width, image.height );
 }

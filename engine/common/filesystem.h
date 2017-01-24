@@ -58,9 +58,6 @@ file_n:	byte[dwadinfo_t[num]->disksize]
 infotable	dlumpinfo_t[dwadinfo_t->numlumps]
 ========================================================================
 */
-#define IDWAD2HEADER	(('2'<<24)+('D'<<16)+('A'<<8)+'W')	// little-endian "WAD2" quake1 gfx.wad
-#define IDWAD3HEADER	(('3'<<24)+('D'<<16)+('A'<<8)+'W')	// little-endian "WAD3" half-life wads
-
 #define WAD3_NAMELEN	16
 #define HINT_NAMELEN	5	// e.g. _mask, _norm
 #define MAX_FILES_IN_WAD	65535	// real limit as above <2Gb size not a lumpcount
@@ -73,9 +70,9 @@ infotable	dlumpinfo_t[dwadinfo_t->numlumps]
 
 typedef struct
 {
-	int		ident;		// should be IWAD, WAD2 or WAD3
+	int		ident;			// should be WAD3
 	int		numlumps;		// num files
-	int		infotableofs;
+	int		infotableofs;	// LUT offset
 } dwadinfo_t;
 
 typedef struct
@@ -93,7 +90,7 @@ typedef struct
 
 struct wfile_s
 {
-	char		filename[MAX_SYSPATH];
+	string		filename;
 	int		infotableofs;
 	byte		*mempool;	// W_ReadLump temp buffers
 	int		numlumps;
@@ -103,25 +100,18 @@ struct wfile_s
 	time_t		filetime;
 };
 
-typedef struct packfile_s
-{
-	char		name[56];
-	fs_offset_t	offset;
-	fs_offset_t	realsize;	// real file size (uncompressed)
-} packfile_t;
-
 typedef struct pack_s
 {
-	char		filename[MAX_SYSPATH];
+	string 	filename;
 	int		handle;
 	int		numfiles;
 	time_t		filetime;	// common for all packed files
-	packfile_t	*files;
+	dpackfile_t	*files;
 } pack_t;
 
 struct searchpath_s
 {
-	char		filename[MAX_SYSPATH];
+	string 	filename;
 	pack_t		*pack;
 	wfile_t		*wad;
 	int		flags;

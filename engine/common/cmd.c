@@ -17,8 +17,8 @@ GNU General Public License for more details.
 #include "client.h"
 #include "server.h"
 
-#define MAX_CMD_BUFFER	16384
-#define MAX_CMD_LINE	1024
+#define MAX_CMD_BUFFER	32768
+#define MAX_CMD_LINE	2048
 
 typedef struct
 {
@@ -214,7 +214,7 @@ void GAME_EXPORT Cbuf_Execute( void )
 		}
 
 		// execute the command line
-		Cmd_ExecuteString( line, src_command );
+		Cmd_ExecuteString( line );
 
 		if( cmd_wait )
 		{
@@ -482,7 +482,6 @@ static char		*cmd_args;
 static char		*cmd_argv[MAX_CMD_TOKENS];
 //static char		cmd_tokenized[MAX_CMD_BUFFER];	// will have 0 bytes inserted
 static cmd_t		*cmd_functions;			// possible commands to execute
-cmd_source_t		cmd_source;
 
 /*
 ============
@@ -664,26 +663,32 @@ void Cmd_AddCommand( const char *cmd_name, xcommand_t function, const char *cmd_
 
 /*
 ============
-Cmd_AddGameCommand
+Cmd_AddServerCommand
 ============
 */
-void GAME_EXPORT Cmd_AddGameCommand( const char *cmd_name, xcommand_t function )
+void GAME_EXPORT Cmd_AddServerCommand( const char *cmd_name, xcommand_t function )
 {
 	cmd_t	*cmd;
 	cmd_t	*prev, *current;
 	int		cmdnamelen;
 
+	if( !cmd_name || !*cmd_name )
+	{
+		MsgDev( D_INFO, "Cmd_AddServerCommand: NULL name\n" );
+		return;
+	}
+
 	// fail if the command is a variable name
 	if( Cvar_FindVar( cmd_name ))
 	{
-		MsgDev( D_INFO, "Cmd_AddGameCommand: %s already defined as a var\n", cmd_name );
+		MsgDev( D_ERROR, "Cmd_AddServerCommand: %s already defined as a var\n", cmd_name );
 		return;
 	}
 
 	// fail if the command already exists
 	if( Cmd_Exists( cmd_name ))
 	{
-		MsgDev(D_INFO, "Cmd_AddGameCommand: %s already defined\n", cmd_name);
+		MsgDev(D_ERROR, "Cmd_AddServerCommand: %s already defined\n", cmd_name);
 		return;
 	}
 
@@ -694,9 +699,9 @@ void GAME_EXPORT Cmd_AddGameCommand( const char *cmd_name, xcommand_t function )
 	// use a small malloc to avoid zone fragmentation
 	cmd = Z_Malloc( sizeof( cmd_t ));
 	cmd->name = copystring( cmd_name );
-	cmd->desc = copystring( "game command" );
+	cmd->desc = copystring( "server command" );
 	cmd->function = function;
-	cmd->flags = CMD_EXTDLL;
+	cmd->flags = CMD_SERVERDLL;
 	cmd->next = cmd_functions;
 
 	// insert it at the right alphanumeric position
@@ -719,24 +724,30 @@ void GAME_EXPORT Cmd_AddGameCommand( const char *cmd_name, xcommand_t function )
 Cmd_AddClientCommand
 ============
 */
-void Cmd_AddClientCommand( const char *cmd_name, xcommand_t function )
+int Cmd_AddClientCommand( const char *cmd_name, xcommand_t function )
 {
 	cmd_t	*cmd;
 	cmd_t	*prev, *current;
 	int		cmdnamelen;
 
+	if( !cmd_name || !*cmd_name )
+	{
+		MsgDev( D_INFO, "Cmd_AddClientCommand: NULL name\n" );
+		return 0;
+	}
+
 	// fail if the command is a variable name
 	if( Cvar_FindVar( cmd_name ))
 	{
 		MsgDev( D_INFO, "Cmd_AddClientCommand: %s already defined as a var\n", cmd_name );
-		return;
+		return 0;
 	}
 
 	// fail if the command already exists
 	if( Cmd_Exists( cmd_name ))
 	{
 		MsgDev(D_INFO, "Cmd_AddClientCommand: %s already defined\n", cmd_name);
-		return;
+		return 0;
 	}
 
 	cmdnamelen = Q_strlen( cmd_name );
@@ -764,6 +775,58 @@ void Cmd_AddClientCommand( const char *cmd_name, xcommand_t function )
 #if defined(XASH_HASHED_VARS)
 	BaseCmd_Insert( HM_CMD, cmd, cmd->name );
 #endif
+
+	return 1;
+}
+
+/*
+============
+Cmd_AddGameUICommand
+============
+*/
+int Cmd_AddGameUICommand( const char *cmd_name, xcommand_t function )
+{
+	cmd_t	*cmd, *cur, *prev;
+
+	if( !cmd_name || !*cmd_name )
+	{
+		MsgDev( D_INFO, "Cmd_AddGameUICommand: NULL name\n" );
+		return 0;
+	}
+
+	// fail if the command is a variable name
+	if( Cvar_FindVar( cmd_name ))
+	{
+		MsgDev( D_INFO, "Cmd_AddGameUICommand: %s already defined as a var\n", cmd_name );
+		return 0;
+	}
+
+	// fail if the command already exists
+	if( Cmd_Exists( cmd_name ))
+	{
+		MsgDev(D_INFO, "Cmd_AddGameUICommand: %s already defined\n", cmd_name );
+		return 0;
+	}
+
+	// use a small malloc to avoid zone fragmentation
+	cmd = Z_Malloc( sizeof( cmd_t ));
+	cmd->name = copystring( cmd_name );
+	cmd->desc = copystring( "GameUI command" );
+	cmd->function = function;
+	cmd->flags = CMD_GAMEUIDLL;
+
+	// insert it at the right alphanumeric position
+	for( prev = NULL, cur = cmd_functions; cur && Q_strcmp( cur->name, cmd_name ) < 0; prev = cur, cur = cur->next );
+
+	if( prev ) prev->next = cmd;
+	else cmd_functions = cmd;
+	cmd->next = cur;
+
+#if defined(XASH_HASHED_VARS)
+	BaseCmd_Insert( HM_CMD, cmd, cmd->name );
+#endif
+
+	return 1;
 }
 
 /*
@@ -923,7 +986,7 @@ Cmd_ExecuteString
 A complete command line has been parsed, so try to execute it
 ============
 */
-void Cmd_ExecuteString( const char *text, cmd_source_t src )
+void Cmd_ExecuteString( const char *text )
 {	
 	cmd_t	*cmd;
 	cmdalias_t	*a;
@@ -931,7 +994,6 @@ void Cmd_ExecuteString( const char *text, cmd_source_t src )
 	int len = 0;;
 
 	// set cmd source
-	cmd_source = src;
 	cmd_condlevel = 0;
 
 	// cvar value substitution
@@ -1025,13 +1087,19 @@ void Cmd_ExecuteString( const char *text, cmd_source_t src )
 	if( Cvar_Command( )) return;
 #ifndef XASH_DEDICATED
 	// forward the command line to the server, so the entity DLL can parse it
-	// UCyborg: Is src_client used anywhere?
-	if( cmd_source == src_command && !Host_IsDedicated() )
+	if( host.type == HOST_NORMAL )
 	{
 		if( cls.state >= ca_connected )
 			Cmd_ForwardToServer();
 	}
+	else
 #endif
+	if( text[0] != '@' && host.type == HOST_NORMAL )
+	{
+		// commands with leading '@' are hidden system commands
+		MsgDev( D_INFO, "Unknown command \"%s\"\n", text );
+	}
+
 }
 
 /*
@@ -1061,7 +1129,7 @@ void Cmd_ForwardToServer( void )
 		return; // not connected
 	}
 
-	BF_WriteByte( &cls.netchan.message, clc_stringcmd );
+	MSG_WriteByte( &cls.netchan.message, clc_stringcmd );
 
 	str[0] = 0;
 	if( Q_stricmp( Cmd_Argv( 0 ), "cmd" ))
@@ -1074,7 +1142,7 @@ void Cmd_ForwardToServer( void )
 		Q_strcat( str, Cmd_Args( ));
 	else Q_strcat( str, "\n" );
 
-	BF_WriteString( &cls.netchan.message, str );
+	MSG_WriteString( &cls.netchan.message, str );
 #endif
 }
 
@@ -1113,7 +1181,7 @@ void Cmd_List_f( void )
 			continue;
 
 		// doesn't look exactly as anticipated, but still better
-		Msg( "%-*s %s\n", maxcmdnamelen, cmd->name, cmd->desc );
+		Msg( "%-*s ^3%s^7\n", maxcmdnamelen, cmd->name, cmd->desc );
 		j++;
 	}
 
@@ -1162,7 +1230,7 @@ static void Cmd_Apropos_f( void )
 		{
 			char *desc;
 
-			if( var->flags & CVAR_EXTDLL )
+			if( var->flags & CVAR_SERVERDLL)
 				desc = "game cvar";
 			else desc = var->description;
 
@@ -1175,7 +1243,7 @@ static void Cmd_Apropos_f( void )
 		
 		// TODO: maybe add flags output like cvarlist, also
 		// fix inconsistencies in output from different commands
-		Msg( "cvar ^3%s^7 is \"%s\" [\"%s\"] %s\n", var->name, var->string, ( var->flags & CVAR_EXTDLL ) ? "" : var->reset_string, ( var->flags & CVAR_EXTDLL ) ? "game cvar" : var->description );
+		Msg( "cvar ^3%s^7 is \"%s\" [\"%s\"] %s\n", var->name, var->string, ( var->flags & CVAR_SERVERDLL) ? "" : var->reset_string, ( var->flags & CVAR_SERVERDLL) ? "game cvar" : var->description );
 		count++;
 	}
 
@@ -1210,7 +1278,7 @@ static void Cmd_Apropos_f( void )
 ============
 Cmd_Unlink
 
-unlink all commands with flag CVAR_EXTDLL
+unlink all commands with specified flag
 ============
 */
 void Cmd_Unlink( int group )
@@ -1218,7 +1286,7 @@ void Cmd_Unlink( int group )
 	cmd_t	*cmd;
 	cmd_t	**prev;
 
-	if( Cvar_VariableInteger( "host_gameloaded" ) && ( group & CMD_EXTDLL ))
+	if( Cvar_VariableInteger( "host_gameloaded" ) && ( group & CMD_SERVERDLL ))
 	{
 		Msg( "Can't unlink commands while game is loaded\n" );
 		return;
@@ -1229,6 +1297,13 @@ void Cmd_Unlink( int group )
 		Msg( "Can't unlink commands while client is loaded\n" );
 		return;
 	}
+
+	if( Cvar_VariableInteger( "host_gameuiloaded" ) && ( group & CMD_CLIENTDLL ))
+	{
+		Msg( "Can't unlink commands while client is loaded\n" );
+		return;
+	}
+
 
 	for( prev = &cmd_functions; ( cmd = *prev ); )
 	{

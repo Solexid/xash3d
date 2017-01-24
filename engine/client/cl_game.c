@@ -93,6 +93,8 @@ static dllfunc_t cdll_new_exports[] = 	// allowed only in SDK 2.3 and higher
 { "HUD_GetRenderInterface", (void **)&clgame.dllFuncs.pfnGetRenderInterface },	// Xash3D ext
 { "HUD_GetPlayerTeam", (void **)&clgame.dllFuncs.pfnGetPlayerTeam },
 { "HUD_ClipMoveToEntity", (void **)&clgame.dllFuncs.pfnClipMoveToEntity },	// Xash3D ext
+{ "HUD_UpdateEntityState", (void **)&clgame.dllFuncs.pfnUpdateEntityState },
+{ "HUD_InterpolateEntity", (void **)&clgame.dllFuncs.pfnInterpolateEntity },
 { "IN_ClientTouchEvent", (void **)&clgame.dllFuncs.pfnTouchEvent}, // Xash3D ext
 { "IN_ClientMoveEvent", (void **)&clgame.dllFuncs.pfnMoveEvent}, // Xash3D ext
 { "IN_ClientLookEvent", (void **)&clgame.dllFuncs.pfnLookEvent}, // Xash3D ext
@@ -414,30 +416,6 @@ void SPR_AdjustSize( float *x, float *y, float *w, float *h )
 
 /*
 ====================
-TextAdjustSize
-
-draw hudsprite routine
-====================
-*/
-void TextAdjustSize( int *x, int *y, int *w, int *h )
-{
-	float	xscale, yscale;
-
-	if( !clgame.ds.adjust_size ) return;
-	if( !x && !y && !w && !h ) return;
-
-	// scale for screen sizes
-	xscale = scr_width->integer / (float)clgame.scrInfo.iWidth;
-	yscale = scr_height->integer / (float)clgame.scrInfo.iHeight;
-
-	if( x ) *x *= xscale;
-	if( y ) *y *= yscale;
-	if( w ) *w *= xscale;
-	if( h ) *h *= yscale;
-}
-
-/*
-====================
 PictAdjustSize
 
 draw hudsprite routine
@@ -729,7 +707,7 @@ void CL_ParseTextMessage( sizebuf_t *msg )
 	int			channel;
 
 	// read channel ( 0 - auto)
-	channel = BF_ReadByte( msg );
+	channel = MSG_ReadByte( msg );
 
 	if( channel <= 0 || channel > ( MAX_TEXTCHANNELS - 1 ))
 	{
@@ -742,27 +720,27 @@ void CL_ParseTextMessage( sizebuf_t *msg )
 	// grab message channel
 	text = &cl_textmessage[channel];
 
-	text->x = (float)(BF_ReadShort( msg ) / 8192.0f);
-	text->y = (float)(BF_ReadShort( msg ) / 8192.0f);
-	text->effect = BF_ReadByte( msg );
-	text->r1 = BF_ReadByte( msg );
-	text->g1 = BF_ReadByte( msg );
-	text->b1 = BF_ReadByte( msg );
-	text->a1 = BF_ReadByte( msg );
-	text->r2 = BF_ReadByte( msg );
-	text->g2 = BF_ReadByte( msg );
-	text->b2 = BF_ReadByte( msg );
-	text->a2 = BF_ReadByte( msg );
-	text->fadein = (float)(BF_ReadShort( msg ) / 256.0f );
-	text->fadeout = (float)(BF_ReadShort( msg ) / 256.0f );
-	text->holdtime = (float)(BF_ReadShort( msg ) / 256.0f );
+	text->x = (float)(MSG_ReadShort( msg ) / 8192.0f);
+	text->y = (float)(MSG_ReadShort( msg ) / 8192.0f);
+	text->effect = MSG_ReadByte( msg );
+	text->r1 = MSG_ReadByte( msg );
+	text->g1 = MSG_ReadByte( msg );
+	text->b1 = MSG_ReadByte( msg );
+	text->a1 = MSG_ReadByte( msg );
+	text->r2 = MSG_ReadByte( msg );
+	text->g2 = MSG_ReadByte( msg );
+	text->b2 = MSG_ReadByte( msg );
+	text->a2 = MSG_ReadByte( msg );
+	text->fadein = (float)(MSG_ReadShort( msg ) / 256.0f );
+	text->fadeout = (float)(MSG_ReadShort( msg ) / 256.0f );
+	text->holdtime = (float)(MSG_ReadShort( msg ) / 256.0f );
 
 	if( text->effect == 2 )
-		text->fxtime = (float)(BF_ReadShort( msg ) / 256.0f );
+		text->fxtime = (float)(MSG_ReadShort( msg ) / 256.0f );
 	else text->fxtime = 0.0f;
 
 	// to prevent grab too long messages
-	Q_strncpy( (char *)text->pMessage, BF_ReadString( msg ), 512 ); 		
+	Q_strncpy( (char *)text->pMessage, MSG_ReadString( msg ), 512 );
 
 	// NOTE: a "HudText" message contain only 'string' with message name, so we
 	// don't needs to use MSG_ routines here, just directly write msgname into netbuffer
@@ -1098,7 +1076,7 @@ void CL_InitEdicts( void )
 		return; // Host_Error without client
 
 	CL_UPDATE_BACKUP = ( cl.maxclients == 1 ) ? SINGLEPLAYER_BACKUP : MULTIPLAYER_BACKUP;
-	cls.num_client_entities = CL_UPDATE_BACKUP * 64;
+	cls.num_client_entities = CL_UPDATE_BACKUP * NUM_PACKET_ENTITIES;
 	cls.packet_entities = Z_Realloc( cls.packet_entities, sizeof( entity_state_t ) * cls.num_client_entities );
 	clgame.entities = Mem_Alloc( clgame.mempool, sizeof( cl_entity_t ) * clgame.maxEntities );
 	clgame.static_entities = Mem_Alloc( clgame.mempool, sizeof( cl_entity_t ) * MAX_STATIC_ENTITIES );
@@ -1110,10 +1088,22 @@ void CL_InitEdicts( void )
 		clgame.maxRemapInfos = clgame.maxEntities + 1; 
 		clgame.remap_info = (remap_info_t **)Mem_Alloc( clgame.mempool, sizeof( remap_info_t* ) * clgame.maxRemapInfos );
 	}
+
+	if( clgame.drawFuncs.R_ProcessEntData != NULL)
+	{
+		// let the client.dll free custom data
+		clgame.drawFuncs.R_ProcessEntData( true );
+	}
 }
 
 void CL_FreeEdicts( void )
 {
+	if( clgame.drawFuncs.R_ProcessEntData != NULL )
+	{
+		// let the client.dll free custom data
+		clgame.drawFuncs.R_ProcessEntData( false );
+	}
+
 	Z_Free( clgame.entities );
 	clgame.entities = NULL;
 
@@ -2218,7 +2208,9 @@ pfnLocalPlayerDucking
 */
 int GAME_EXPORT pfnLocalPlayerDucking( void )
 {
-	return cl.predicted.usehull == 1;
+	if( CL_IsPredicted() )
+		return cl.predicted.usehull == 1;
+	return cl.frame.client.bInDuck;
 }
 
 /*
@@ -2294,7 +2286,6 @@ pfnSetTraceHull
 */
 void GAME_EXPORT CL_SetTraceHull( int hull )
 {
-	//clgame.old_trace_hull = clgame.pmove->usehull;
 	clgame.pmove->usehull = bound( 0, hull, 3 );
 }
 
@@ -2308,7 +2299,6 @@ void GAME_EXPORT CL_PlayerTrace( float *start, float *end, int traceFlags, int i
 {
 	if( !tr ) return;
 	*tr = PM_PlayerTraceExt( clgame.pmove, start, end, traceFlags, clgame.pmove->numphysent, clgame.pmove->physents, ignore_pe, NULL );
-	//clgame.pmove->usehull = clgame.old_trace_hull;	// restore old trace hull
 }
 
 /*
@@ -2321,7 +2311,6 @@ void GAME_EXPORT CL_PlayerTraceExt( float *start, float *end, int traceFlags, in
 {
 	if( !tr ) return;
 	*tr = PM_PlayerTraceExt( clgame.pmove, start, end, traceFlags, clgame.pmove->numphysent, clgame.pmove->physents, -1, pfnIgnore );
-	//clgame.pmove->usehull = clgame.old_trace_hull;	// restore old trace hull
 }
 
 /*
@@ -2618,8 +2607,8 @@ int GAME_EXPORT pfnServerCmdUnreliable( char *szCmdString )
 	if( !szCmdString || !szCmdString[0] )
 		return 0;
 
-	BF_WriteByte( &cls.datagram, clc_stringcmd );
-	BF_WriteString( &cls.datagram, szCmdString );
+	MSG_WriteByte( &cls.datagram, clc_stringcmd );
+	MSG_WriteString( &cls.datagram, szCmdString );
 
 	return 1;
 }
@@ -2717,6 +2706,24 @@ TODO: implement
 */
 void GAME_EXPORT pfnSetLightmapScale( float scale )
 {
+}
+
+/*
+=============
+pfnParseFile
+
+handle colon separately
+=============
+*/
+char *pfnParseFile( char *data, char *token )
+{
+	char	*out;
+
+	host.com_handlecolon = true;
+	out = COM_ParseFile( data, token );
+	host.com_handlecolon = false;
+
+	return out;
 }
 
 /*
@@ -2892,9 +2899,12 @@ pfnGetAppID
 */
 int GAME_EXPORT pfnGetAppID( void )
 {
-	return 130;
+	// return 10; // CS
+	// return 20; // TFC
+	// return 130; // HL:BS
+	// return
 
-	//return 220; // standard Valve value
+	return 220; // standard Valve value
 }
 
 /*
@@ -3079,7 +3089,7 @@ void GAME_EXPORT TriBrightness( float brightness )
 	rgba[0] = clgame.ds.triColor[0] * brightness;
 	rgba[1] = clgame.ds.triColor[1] * brightness;
 	rgba[2] = clgame.ds.triColor[2] * brightness;
-	rgba[3] = clgame.ds.triColor[3] * brightness;
+	rgba[3] = clgame.ds.triColor[3];
 
 	pglColor4ubv( rgba );
 }
@@ -3129,7 +3139,7 @@ int GAME_EXPORT TriSpriteTexture( model_t *pSpriteModel, int frame )
 	if( psprite->texFormat == SPR_ALPHTEST )
 	{
 		pglEnable( GL_ALPHA_TEST );
-		pglAlphaFunc( GL_GREATER, 0.0f );
+		pglAlphaFunc( GL_GEQUAL, 0.5f );
 	}
 
 	GL_Bind( XASH_TEXTURE0, gl_texturenum );
@@ -3350,7 +3360,7 @@ void GAME_EXPORT NetAPI_Status( net_status_t *status )
 	status->connected = NET_IsLocalAddress( cls.netchan.remote_address ) ? false : true;
 	status->connection_time = host.realtime - cls.netchan.connect_time;
 	status->remote_address = cls.netchan.remote_address;
-	status->packet_loss = cls.packet_loss / 100; // percent
+	status->packet_loss = cls.packet_loss / 100.0f; // percent
 	status->latency = cl.frame.latency;
 	status->local_address = net_local;
 	status->rate = cls.netchan.rate;
@@ -3378,15 +3388,14 @@ void GAME_EXPORT NetAPI_SendRequest( int context, int request, int flags, double
 	for( i = 0; i < MAX_REQUESTS; i++ )
 	{
 		nr = &clgame.net_requests[i];
-		if( !nr->pfnFunc || nr->timeout < host.realtime )
-			break;
+		if( !nr->pfnFunc ) break;
 	}
 
 	if( i == MAX_REQUESTS )
 	{
 		double	max_timeout = 0;
 
-		// no free requests? use older
+		// no free requests? use oldest
 		for( i = 0, nr = NULL; i < MAX_REQUESTS; i++ )
 		{
 			if(( host.realtime - clgame.net_requests[i].timesend ) > max_timeout )
@@ -3414,6 +3423,16 @@ void GAME_EXPORT NetAPI_SendRequest( int context, int request, int flags, double
 	if( request == NETAPI_REQUEST_SERVERLIST )
 	{
 		// UNDONE: build request for master-server
+
+		char fullquery[512] = "1\xFF" "0.0.0.0:0\0" "\\gamedir\\";
+
+		if( nr->resp.remote_address.port )
+			nr->resp.remote_address.port = MSG_BigShort( PORT_MASTER );
+
+		Q_strcpy( &fullquery[22], GI->gamedir );
+		NET_SendPacket( NS_CLIENT, Q_strlen( GI->gamedir ) + 23, fullquery, nr->resp.remote_address );
+		clgame.request_type = NET_REQUEST_CLIENT;
+		clgame.master_request = nr;
 	}
 	else
 	{
@@ -3431,15 +3450,34 @@ NetAPI_CancelRequest
 */
 void GAME_EXPORT NetAPI_CancelRequest( int context )
 {
+	net_request_t *nr;
 	int	i;
 
 	// find a specified request
 	for( i = 0; i < MAX_REQUESTS; i++ )
 	{
-		if( clgame.net_requests[i].resp.context == context )
+		nr = &clgame.net_requests[i];
+
+		if( nr->resp.context == context )
 		{
-			MsgDev( D_NOTE, "Request with context %i cancelled\n", context );
+			if( nr->pfnFunc )
+			{
+				SetBits( nr->resp.error, NET_ERROR_TIMEOUT );
+				nr->resp.ping = host.realtime - nr->timesend;
+				nr->pfnFunc( &nr->resp );
+			}
+
+			if( nr->resp.type == NETAPI_REQUEST_SERVERLIST && nr == clgame.master_request )
+			{
+				if( clgame.request_type == NET_REQUEST_CLIENT )
+					clgame.request_type = NET_REQUEST_CANCEL;
+
+				clgame.master_request = NULL;
+
+			}
+
 			Q_memset( &clgame.net_requests[i], 0, sizeof( net_request_t ));
+
 			break;
 		}
 	}
@@ -3453,7 +3491,22 @@ NetAPI_CancelAllRequests
 */
 void GAME_EXPORT NetAPI_CancelAllRequests( void )
 {
+	net_request_t	*nr;
+	int		i;
+
+	// tell the user about cancel
+	for( i = 0; i < MAX_REQUESTS; i++ )
+	{
+		nr = &clgame.net_requests[i];
+		if( !nr->pfnFunc ) continue;	// not used
+		SetBits( nr->resp.error, NET_ERROR_TIMEOUT );
+		nr->resp.ping = host.realtime - nr->timesend;
+		nr->pfnFunc( &nr->resp );
+	}
+
 	Q_memset( clgame.net_requests, 0, sizeof( clgame.net_requests ));
+	clgame.request_type = NET_REQUEST_CANCEL;
+	clgame.master_request = NULL;
 }
 
 /*
@@ -3784,10 +3837,10 @@ static cl_enginefunc_t gEngfuncs =
 	CL_FillRGBA,
 	pfnGetScreenInfo,
 	pfnSetCrosshair,
-	(void*)pfnCvar_RegisterVariable,
+	(void*)pfnCvar_RegisterClientVariable,
 	(void*)Cvar_VariableValue,
 	(void*)Cvar_VariableString,
-	(void*)pfnAddClientCommand,
+	(void*)Cmd_AddClientCommand,
 	(void*)pfnHookUserMsg,
 	(void*)pfnServerCmd,
 	(void*)pfnClientCmd,
@@ -3850,7 +3903,7 @@ static cl_enginefunc_t gEngfuncs =
 	VGui_GetPanel,
 	VGui_ViewportPaintBackground,
 	(void*)COM_LoadFile,
-	COM_ParseFile,
+	pfnParseFile,
 	COM_FreeFile,
 	&gTriApi,
 	&gEfxApi,
@@ -3933,7 +3986,7 @@ void CL_UnloadProgs( void )
 	Mem_FreePool( &clgame.mempool );
 	Q_memset( &clgame, 0, sizeof( clgame ));
 
-	Cvar_Unlink();
+	Cvar_Unlink( CVAR_CLIENTDLL );
 	Cmd_Unlink( CMD_CLIENTDLL );
 }
 
@@ -3962,7 +4015,7 @@ qboolean CL_LoadProgs( const char *name )
 	// vgui must startup BEFORE loading client.dll to avoid get error ERROR_NOACESS
 	// during LoadLibrary
 #ifdef XASH_VGUI
-	VGui_Startup (menu.globals->scrWidth, menu.globals->scrHeight);
+	VGui_Startup (gameui.globals->scrWidth, gameui.globals->scrHeight);
 #endif
 	
 	clgame.hInstance = Com_LoadLibrary( name, false );
@@ -4038,7 +4091,7 @@ qboolean CL_LoadProgs( const char *name )
 		return false;
 	}
 
-	Cvar_Get( "cl_nopred", "1", CVAR_ARCHIVE|CVAR_USERINFO, "disable client movement predicting" );
+	Cvar_Get( "cl_nopred", "1", CVAR_ARCHIVE, "disable client movement predicting" );
 	cl_lw = Cvar_Get( "cl_lw", "0", CVAR_ARCHIVE|CVAR_USERINFO, "enable client weapon predicting" );
 	Cvar_Get( "cl_lc", "0", CVAR_ARCHIVE|CVAR_USERINFO, "enable lag compensation" );
 	Cvar_FullSet( "host_clientloaded", "1", CVAR_INIT );
@@ -4051,13 +4104,14 @@ qboolean CL_LoadProgs( const char *name )
 	CL_InitParticles ();
 	CL_InitViewBeams ();
 	CL_InitTempEnts ();
-	CL_InitEdicts ();	// initailize local player and world
-	CL_InitClientMove(); // initialize pm_shared
 
 	if( !R_InitRenderAPI())	// Xash3D extension
 	{
 		MsgDev( D_WARN, "CL_LoadProgs: couldn't get render API\n" );
 	}
+	CL_InitEdicts ();	// initailize local player and world
+	CL_InitClientMove(); // initialize pm_shared
+
 	Mobile_Init(); // Xash3D extension: mobile interface
 
 	Sequence_Init();

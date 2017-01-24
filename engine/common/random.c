@@ -23,8 +23,8 @@ static int idum = 0;
 #define IQ		127773
 #define IR		2836
 #define NTAB		32
-#define NDIV		(1+(IM-1)/NTAB)
-#define AM		(1.0/IM)
+#define NDIV		(1 + (IM - 1)/NTAB)
+#define AM		(1.0 / IM)
 #define EPS		1.2e-7
 #define RNMX		(1.0 - EPS)
 
@@ -41,15 +41,14 @@ void COM_SetRandomSeed( int lSeed )
 
 int lran1( void )
 {
-	int	j;
-	int	k;
+	static long	iy = 0;
+	static long	iv[NTAB];
+	int		j;
+	long	k;
 
-	static int iy = 0;
-	static int iv[NTAB];
-	
 	if( idum <= 0 || !iy )
 	{
-		if(-(idum) < 1) idum=1;
+		if( -(idum) < 1 ) idum = 1;
 		else idum = -(idum);
 
 		for( j = NTAB + 7; j >= 0; j-- )
@@ -62,7 +61,7 @@ int lran1( void )
 		iy = iv[0];
 	}
 
-	k = (idum)/IQ;
+	k = (idum) / IQ;
 	idum = IA * (idum - k * IQ) - IR * k;
 	if( idum < 0 ) idum += IM;
 	j = iy / NDIV;
@@ -72,7 +71,7 @@ int lran1( void )
 	return iy;
 }
 
-// fran1 -- return a random floating-point number on the interval [0,1)
+// fran1 -- return a random floating-point number on the interval [0,1]
 float fran1( void )
 {
 	float temp = (float)AM * lran1();
@@ -85,9 +84,9 @@ float GAME_EXPORT Com_RandomFloat( float flLow, float flHigh )
 {
 	float	fl;
 
-	if( idum == 0 ) COM_SetRandomSeed(0);
+	if( idum == 0 ) COM_SetRandomSeed( 0 );
 
-	fl = fran1(); // float in [0, 1)
+	fl = fran1(); // float in [0,1]
 	return (fl * (flHigh - flLow)) + flLow; // float in [low, high)
 }
 

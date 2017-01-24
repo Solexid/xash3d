@@ -57,8 +57,18 @@ GNU General Public License for more details.
 #define STUDIO_TO_RAD	(M_PI / 32768.0)
 #define nanmask		(255<<23)
 
+#define INV127F		( 1.0f / 127.0f )
+#define INV255F		( 1.0f / 255.0f )
+#define MAKE_SIGNED( x )	((( x ) * INV127F ) - 1.0f )
+
+#define Q_min( a, b )	(((a) < (b)) ? (a) : (b))
+#define Q_max( a, b )	(((a) > (b)) ? (a) : (b))
+#define Q_recip( a )	((float)(1.0f / (float)(a)))
+#define Q_floor( a )	((float)(long)(a))
+#define Q_ceil( a )		((float)(long)((a) + 1))
 #define Q_rint(x)		((x) < 0 ? ((int)((x)-0.5f)) : ((int)((x)+0.5f)))
 #define IS_NAN(x)		(((*(int *)&x)&nanmask)==nanmask)
+#define ALIGN( x, a )	((( x ) + (( size_t )( a ) - 1 )) & ~(( size_t )( a ) - 1 ))
 
 #define VectorIsNAN(v) (IS_NAN(v[0]) || IS_NAN(v[1]) || IS_NAN(v[2]))	
 #define DotProduct(x,y) ((x)[0]*(y)[0]+(x)[1]*(y)[1]+(x)[2]*(y)[2])
@@ -135,7 +145,8 @@ qboolean BoundsIntersect( const vec3_t mins1, const vec3_t maxs1, const vec3_t m
 qboolean BoundsAndSphereIntersect( const vec3_t mins, const vec3_t maxs, const vec3_t origin, float radius );
 float RadiusFromBounds( const vec3_t mins, const vec3_t maxs );
 
-void AngleQuaternion( const vec3_t angles, vec4_t q );
+void AngleQuaternion(const vec3_t angles, vec4_t q , qboolean studio);
+void QuaternionAngle( const vec4_t q, vec3_t angles );
 void QuaternionSlerp( const vec4_t p, vec4_t q, float t, vec4_t qt );
 float RemapVal( float val, float A, float B, float C, float D );
 float ApproachVal( float target, float value, float speed );

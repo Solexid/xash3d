@@ -6,7 +6,7 @@
 #define VID_AUTOMODE	"-1"
 #define VID_DEFAULTMODE	2.0f
 #define DISP_CHANGE_BADDUALVIEW	-6 // MSVC 6.0 doesn't
-#define WINDOW_NAME			"Xash Window" // Half-Life
+#define WINDOW_NAME			"Xash3D Window" // Half-Life
 
 extern int num_vidmodes;
 
