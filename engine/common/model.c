@@ -1037,7 +1037,7 @@ static void Mod_LoadTextures( const dlump_t *l )
 	{
 		tx = loadmodel->textures[i];
 
-		if( tx->name[0] != '+' || tx->name[1] == 0 || tx->name[2] == 0 )
+		if( ( tx->name[0] != '+' ) || tx->name[1] == 0 || tx->name[2] == 0 )
 			continue;
 
 		if( tx->anim_next )
@@ -1073,10 +1073,11 @@ static void Mod_LoadTextures( const dlump_t *l )
 		{
 			tx2 = loadmodel->textures[j];
 
-			if( tx2->name[0] != '+' || Q_strcmp( tx2->name + 2, tx->name + 2 ))
+			if( ( tx2->name[0] != '+') || Q_strcmp( tx2->name + 2, tx->name + 2 ) )
 				continue;
 
 			num = tx2->name[1];
+
 			if( num >= '0' && num <= '9' )
 			{
 				num -= '0';
@@ -1098,12 +1099,14 @@ static void Mod_LoadTextures( const dlump_t *l )
 		for( j = 0; j < max; j++ )
 		{
 			tx2 = anims[j];
+
 			if( !tx2 )
 			{
 				MsgDev( D_ERROR, "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
 				tx->anim_total = 0;
-				continue;
+				break;
 			}
+
 			tx2->anim_total = max * ANIM_CYCLE;
 			tx2->anim_min = j * ANIM_CYCLE;
 			tx2->anim_max = (j + 1) * ANIM_CYCLE;
@@ -1114,12 +1117,14 @@ static void Mod_LoadTextures( const dlump_t *l )
 		for( j = 0; j < altmax; j++ )
 		{
 			tx2 = altanims[j];
+
 			if( !tx2 )
 			{
 				MsgDev( D_ERROR, "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
 				tx->anim_total = 0;
-				continue;
+				break;
 			}
+
 			tx2->anim_total = altmax * ANIM_CYCLE;
 			tx2->anim_min = j * ANIM_CYCLE;
 			tx2->anim_max = (j+1) * ANIM_CYCLE;
@@ -1158,7 +1163,7 @@ static void Mod_LoadTextures( const dlump_t *l )
 		for( j = i + 1; j < loadmodel->numtextures; j++ )
 		{
 			tx2 = loadmodel->textures[j];
-			if( !tx2->name[0] != '-' || Q_strcmp( tx2->name + 2, tx->name + 2 ))
+			if( (tx2->name[0] != '-') || Q_strcmp( tx2->name + 2, tx->name + 2 ))
 				continue;
 
 			num = tx2->name[1];
@@ -1176,12 +1181,14 @@ static void Mod_LoadTextures( const dlump_t *l )
 		for( j = 0; j < max; j++ )
 		{
 			tx2 = anims[j];
+
 			if( !tx2 ) 
 			{
 				MsgDev( D_ERROR, "Mod_LoadTextures: missing frame %i of %s\n", j, tx->name );
 				tx->anim_total = 0;
-				continue;
+				break;
 			}
+
 			tx2->anim_total = -( max * ANIM_CYCLE ); // to differentiate from animations
 			tx2->anim_min = j * ANIM_CYCLE;
 			tx2->anim_max = (j + 1) * ANIM_CYCLE;
