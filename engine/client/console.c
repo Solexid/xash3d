@@ -1980,7 +1980,7 @@ void Con_DrawSolidConsole( int lines )
 	// draw the text
 	if( CON_LINES_COUNT > 0 )
 	{
-		int	ymax = lines - (con.curFont->charHeight * 2.0f);
+		int	ymax = lines - (con.curFont->charHeight * (Con_DrawProgress()?3:2) );
 		int	lastline;
 
 		Con_LastVisibleLine( &lastline );
