@@ -2293,5 +2293,6 @@ void CL_Shutdown( void )
 	SCR_FreeCinematic (); // release AVI's *after* client.dll because custom renderer may use them
 	S_Shutdown ();
 	R_Shutdown ();
+	Con_Shutdown();
 }
 #endif // XASH_DEDICATED

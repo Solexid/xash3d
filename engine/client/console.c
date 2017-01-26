@@ -885,7 +885,11 @@ void Con_DrawStringLen( const char *pText, int *length, int *height )
 			continue;
 		}
 
-		curLength += con.curFont->charWidths[c];
+		c = Con_UtfProcessChar( c );
+
+		if( c )
+			curLength += con.curFont->charWidths[c];
+
 		pText++;
 
 		if( curLength > *length )
