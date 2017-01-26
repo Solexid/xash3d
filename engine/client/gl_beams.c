@@ -1986,9 +1986,9 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 		life = (float)(MSG_ReadByte( msg ) * 0.1f);
 		width = (float)(MSG_ReadByte( msg ) * 0.1f);
 		noise = (float)(MSG_ReadByte( msg ) * 0.1f);
-		r = (float)MSG_ReadByte( msg );
-		g = (float)MSG_ReadByte( msg );
-		b = (float)MSG_ReadByte( msg );
+		r = (float)MSG_ReadByte( msg ) / 255.0f;
+		g = (float)MSG_ReadByte( msg ) / 255.0f;
+		b = (float)MSG_ReadByte( msg ) / 255.0f;
 		brightness = (float)MSG_ReadByte( msg );
 		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamPoints( start, end, modelIndex, life, width, noise, brightness, speed, startFrame,
@@ -2005,9 +2005,9 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 		life = (float)(MSG_ReadByte( msg ) * 0.1f);
 		width = (float)(MSG_ReadByte( msg ) * 0.1f);
 		noise = (float)(MSG_ReadByte( msg ) * 0.01f);
-		r = (float)MSG_ReadByte( msg );
-		g = (float)MSG_ReadByte( msg );
-		b = (float)MSG_ReadByte( msg );
+		r = (float)MSG_ReadByte( msg ) / 255.0f;
+		g = (float)MSG_ReadByte( msg ) / 255.0f;
+		b = (float)MSG_ReadByte( msg ) / 255.0f;
 		brightness = (float)MSG_ReadByte( msg );
 		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamEntPoint( startEnt, end, modelIndex, life, width, noise, brightness, speed, startFrame,
@@ -2035,9 +2035,9 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 		life = (float)(MSG_ReadByte( msg ) * 0.1f);
 		width = (float)(MSG_ReadByte( msg ) * 0.1f);
 		noise = (float)(MSG_ReadByte( msg ) * 0.01f);
-		r = (float)MSG_ReadByte( msg );
-		g = (float)MSG_ReadByte( msg );
-		b = (float)MSG_ReadByte( msg );
+		r = (float)MSG_ReadByte( msg ) / 255.0f;
+		g = (float)MSG_ReadByte( msg ) / 255.0f;
+		b = (float)MSG_ReadByte( msg ) / 255.0f;
 		brightness = (float)MSG_ReadByte( msg );
 		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamEnts( startEnt, endEnt, modelIndex, life, width, noise, brightness, speed, startFrame,
@@ -2072,9 +2072,9 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 		life = (float)(MSG_ReadByte( msg ) * 0.1f);
 		width = (float)MSG_ReadByte( msg );
 		noise = (float)(MSG_ReadByte( msg ) * 0.1f);
-		r = (float)MSG_ReadByte( msg );
-		g = (float)MSG_ReadByte( msg );
-		b = (float)MSG_ReadByte( msg );
+		r = (float)MSG_ReadByte( msg ) / 255.0f;
+		g = (float)MSG_ReadByte( msg ) / 255.0f;
+		b = (float)MSG_ReadByte( msg ) / 255.0f;
 		brightness = (float)MSG_ReadByte( msg );
 		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamCirclePoints( beamType, start, end, modelIndex, life, width, noise, brightness, speed,
@@ -2100,9 +2100,9 @@ void CL_ParseViewBeam( sizebuf_t *msg, int beamType )
 		life = (float)(MSG_ReadByte( msg ) * 0.1f);
 		width = (float)(MSG_ReadByte( msg ) * 0.1f);
 		noise = (float)(MSG_ReadByte( msg ) * 0.1f);
-		r = (float)MSG_ReadByte( msg );
-		g = (float)MSG_ReadByte( msg );
-		b = (float)MSG_ReadByte( msg );
+		r = (float)MSG_ReadByte( msg ) / 255.0f;
+		g = (float)MSG_ReadByte( msg ) / 255.0f;
+		b = (float)MSG_ReadByte( msg ) / 255.0f;
 		brightness = (float)MSG_ReadByte( msg );
 		speed = (float)(MSG_ReadByte( msg ) * 0.1f);
 		CL_BeamRing( startEnt, endEnt, modelIndex, life, width, noise, brightness, speed, startFrame,
