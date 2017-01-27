@@ -352,7 +352,7 @@ void *GL_GetProcAddress( const char *name )
 void GL_InitExtensions( void )
 {
 	// initialize gl extensions
-	GL_CheckExtension( "OpenGL 1.1.0", (void*)opengl_110funcs, NULL, GL_OPENGL_110 );
+	GL_CheckExtension( "OpenGL 1.1.0", opengl_110funcs, NULL, GL_OPENGL_110 );
 
 	// get our various GL strings
 	glConfig.vendor_string = pglGetString( GL_VENDOR );
@@ -365,45 +365,45 @@ void GL_InitExtensions( void )
 
 	GL_SetExtension( GL_DRAW_RANGEELEMENTS_EXT, false );
 	GL_SetExtension( GL_ARB_MULTITEXTURE, false );
-	GL_SetExtension( GL_ENV_COMBINE_EXT, false );
+	//GL_SetExtension( GL_ENV_COMBINE_EXT, false );
 	GL_SetExtension( GL_DOT3_ARB_EXT, false );
 	GL_SetExtension( GL_TEXTURE_3D_EXT, false );
-	GL_SetExtension( GL_SGIS_MIPMAPS_EXT, true ); // gles specs
+	//GL_SetExtension( GL_SGIS_MIPMAPS_EXT, true ); // gles specs
 
 	// hardware cubemaps
-	GL_CheckExtension( "GL_OES_texture_cube_map", NULL, "gl_texture_cubemap", GL_TEXTURECUBEMAP_EXT );
+	//GL_CheckExtension( "GL_OES_texture_cube_map", NULL, "gl_texture_cubemap", GL_TEXTURECUBEMAP_EXT );
 
-	if( GL_Support( GL_TEXTURECUBEMAP_EXT ))
+/*	if( GL_Support( GL_TEXTURECUBEMAP_EXT ))
 	{
 		pglGetIntegerv( GL_MAX_CUBE_MAP_TEXTURE_SIZE_ARB, &glConfig.max_cubemap_size );
-	}
+	}*/
 	GL_SetExtension( GL_ARB_SEAMLESS_CUBEMAP, false );
 
-	GL_SetExtension( GL_EXT_POINTPARAMETERS, false );
+	//GL_SetExtension( GL_EXT_POINTPARAMETERS, false );
 	GL_CheckExtension( "GL_OES_texture_npot", NULL, "gl_texture_npot", GL_ARB_TEXTURE_NPOT_EXT );
 
 	GL_SetExtension( GL_TEXTURE_COMPRESSION_EXT, false );
-	GL_SetExtension( GL_CUSTOM_VERTEX_ARRAY_EXT, false );
+	//GL_SetExtension( GL_CUSTOM_VERTEX_ARRAY_EXT, false );
 	GL_SetExtension( GL_CLAMPTOEDGE_EXT, true ); // by gles1 specs
 	GL_SetExtension( GL_ANISOTROPY_EXT, false );
-	GL_SetExtension( GL_TEXTURE_LODBIAS, false );
+	//GL_SetExtension( GL_TEXTURE_LODBIAS, false );
 	GL_SetExtension( GL_CLAMP_TEXBORDER_EXT, false );
-	GL_SetExtension( GL_BLEND_MINMAX_EXT, false );
-	GL_SetExtension( GL_BLEND_SUBTRACT_EXT, false );
-	GL_SetExtension( GL_SEPARATESTENCIL_EXT, false );
-	GL_SetExtension( GL_STENCILTWOSIDE_EXT, false );
+	//GL_SetExtension( GL_BLEND_MINMAX_EXT, false );
+	//GL_SetExtension( GL_BLEND_SUBTRACT_EXT, false );
+	//GL_SetExtension( GL_SEPARATESTENCIL_EXT, false );
+	//GL_SetExtension( GL_STENCILTWOSIDE_EXT, false );
 	GL_SetExtension( GL_ARB_VERTEX_BUFFER_OBJECT_EXT, false );
-	GL_SetExtension( GL_TEXTURE_ENV_ADD_EXT,false  );
+	//GL_SetExtension( GL_TEXTURE_ENV_ADD_EXT,false  );
 	GL_SetExtension( GL_SHADER_OBJECTS_EXT, false );
 	GL_SetExtension( GL_SHADER_GLSL100_EXT, false );
-	GL_SetExtension( GL_VERTEX_SHADER_EXT,false );
-	GL_SetExtension( GL_FRAGMENT_SHADER_EXT, false );
+	//GL_SetExtension( GL_VERTEX_SHADER_EXT,false );
+	//GL_SetExtension( GL_FRAGMENT_SHADER_EXT, false );
 	GL_SetExtension( GL_SHADOW_EXT, false );
 	GL_SetExtension( GL_ARB_DEPTH_FLOAT_EXT, false );
 	GL_SetExtension( GL_OCCLUSION_QUERIES_EXT,false );
 	GL_CheckExtension( "GL_OES_depth_texture", NULL, "gl_depthtexture", GL_DEPTH_TEXTURE );
 
-	glConfig.texRectangle = glConfig.max_2d_rectangle_size = 0; // no rectangle
+	//glConfig.texRectangle = glConfig.max_2d_rectangle_size = 0; // no rectangle
 
 	glConfig.max_2d_texture_size = 0;
 	pglGetIntegerv( GL_MAX_TEXTURE_SIZE, &glConfig.max_2d_texture_size );
@@ -422,8 +422,8 @@ void GL_InitExtensions( void )
 	Cvar_Set( "gl_anisotropy", va( "%f", bound( 0, gl_texture_anisotropy->value, glConfig.max_texture_anisotropy )));
 
 	// software mipmap generator does wrong result with NPOT textures ...
-	if( !GL_Support( GL_SGIS_MIPMAPS_EXT ))
-		GL_SetExtension( GL_ARB_TEXTURE_NPOT_EXT, false );
+//	if( !GL_Support( GL_SGIS_MIPMAPS_EXT ))
+//		GL_SetExtension( GL_ARB_TEXTURE_NPOT_EXT, false );
 
 	if( GL_Support( GL_TEXTURE_COMPRESSION_EXT ))
 		Image_AddCmdFlags( IL_DDS_HARDWARE );
@@ -575,7 +575,7 @@ void VID_StartupGamma( void )
 	Cvar_FullSet( "gl_ignorehwgamma", "1", CVAR_GLCONFIG );
 
 	glConfig.deviceSupportsGamma = false;	// even if supported!
-	BuildGammaTable( vid_gamma->value, vid_texgamma->value );
+	//BuildGammaTable( vid_gamma->value, vid_texgamma->value );
 	MsgDev( D_NOTE, "VID_StartupGamma: software gamma initialized\n" );
 }
 

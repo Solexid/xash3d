@@ -467,6 +467,7 @@ void FS_FreeImage( rgbdata_t *pack )
 {
 	if( pack )
 	{
+		if( pack->flags & IMAGE_DONT_FREE ) return;
 		if( pack->buffer ) Mem_Free( pack->buffer );
 		if( pack->palette ) Mem_Free( pack->palette );
 		Mem_Free( pack );

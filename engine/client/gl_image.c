@@ -4511,6 +4511,7 @@ static void R_InitBuiltinTextures( void )
 
 		pic = textures[i].init( &flags );
 		if( pic == NULL ) continue;
+		pic->flags |= IMAGE_DONT_FREE;
 		*textures[i].texnum = GL_LoadTextureInternal( textures[i].name, pic, flags, false );
 	}
 }
