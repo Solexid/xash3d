@@ -542,7 +542,7 @@ void SV_WriteEntitiesToClient( sv_client_t *cl, sizebuf_t *msg )
 	client_frame_t	*frame;
 	entity_state_t	*state;
 	static sv_ents_t	frame_ents;
-	int		i, send_pings;
+	int		i, send_pings = 0;
 
 	clent = cl->edict;
 	if(	!SV_IsValidEdict( clent ) )
