@@ -1784,7 +1784,7 @@ qboolean Netchan_Process( netchan_t *chan, sizebuf_t *msg )
 					MSG_Clear( &pbuf->frag_message );
 
 					MSG_StartReading( &temp, msg->pData, MSG_GetMaxBytes( msg ), MSG_GetNumBitsRead( msg ) + frag_offset[i], -1 );
-					MSG_ReadBits( msg, buffer, bits );
+					MSG_ReadBits( &temp, buffer, bits );
 					MSG_WriteBits( &pbuf->frag_message, buffer, bits );
 				}
 				else
