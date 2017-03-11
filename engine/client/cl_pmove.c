@@ -1181,6 +1181,16 @@ void CL_PredictMovement( void )
 		if( !cl_lw->integer )
 		{
 			cl.predicted.viewmodel = cl.frame.client.viewmodel;
+
+			// keep cl.predicted valid
+			VectorCopy( cl.frame.client.origin, cl.predicted.origin );
+			VectorCopy( cl.frame.client.velocity, cl.predicted.velocity );
+			VectorCopy( cl.frame.client.punchangle, cl.predicted.punchangle );
+			VectorCopy( cl.frame.client.view_ofs, cl.predicted.viewofs );
+			cl.predicted.waterlevel = cl.frame.client.waterlevel;
+			cl.predicted.onground = -1;
+			cl.predicted.usehull = cl.frame.playerstate[cl.playernum].usehull;
+			cl.predicted.moving = 0;
 			return;
 		}
 
@@ -1226,7 +1236,19 @@ void CL_PredictMovement( void )
 		}
 
 		if( to )
+		{
 			cl.predicted.viewmodel = to->client.viewmodel;
+
+			// keep cl.predicted valid, but ignore predicted values
+			VectorCopy( cl.frame.client.origin, cl.predicted.origin );
+			VectorCopy( cl.frame.client.velocity, cl.predicted.velocity );
+			VectorCopy( cl.frame.client.punchangle, cl.predicted.punchangle );
+			VectorCopy( cl.frame.client.view_ofs, cl.predicted.viewofs );
+			cl.predicted.waterlevel = cl.frame.client.waterlevel;
+			cl.predicted.onground = -1;
+			cl.predicted.usehull = cl.frame.playerstate[cl.playernum].usehull;
+			cl.predicted.moving = 0;
+		}
 		return;
 	}
 
