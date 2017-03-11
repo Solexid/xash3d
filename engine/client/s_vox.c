@@ -395,6 +395,7 @@ void VOX_FreeWord( channel_t *pchan )
 	pchan->currentWord = NULL; // sentence is finished
 	Q_memset( &pchan->pMixer, 0, sizeof( pchan->pMixer ));
 
+#if 0
 	// release unused sounds
 	if( pchan->words[pchan->wordIndex].sfx )
 	{
@@ -405,6 +406,7 @@ void VOX_FreeWord( channel_t *pchan )
 			pchan->words[pchan->wordIndex].sfx = NULL;
 		}
 	}
+#endif
 }
 
 void VOX_LoadFirstWord( channel_t *pchan, voxword_t *pwords )
