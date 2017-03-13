@@ -23,6 +23,7 @@ GNU General Public License for more details.
 #include <android/log.h>
 #include <jni.h>
 #include <EGL/egl.h> // nanogl
+#include <errno.h>
 convar_t *android_sleep;
 
 #ifndef JAVA_EXPORT
@@ -85,7 +86,10 @@ typedef enum event_type
 	event_joybutton,
 	event_joyaxis,
 	event_joyadd,
-	event_joyremove
+	event_joyremove,
+	event_onstop,
+	event_onpause,
+	event_ondestroy
 } eventtype_t;
 
 typedef struct touchevent_s
@@ -159,6 +163,7 @@ static struct {
 static struct jnimethods_s
 {
 	jclass actcls;
+	JavaVM *vm;
 	JNIEnv *env;
 	jmethodID swapBuffers;
 	jmethodID toggleEGL;
@@ -167,6 +172,7 @@ static struct jnimethods_s
 	jmethodID messageBox;
 	jmethodID createGLContext;
 	jmethodID deleteGLContext;
+	jmethodID notify;
 	int width, height;
 } jni;
 
@@ -310,6 +316,34 @@ void Android_RunEvents()
 				Joy_AddEvent( 0 );
 			Joy_ButtonEvent( events.queue[i].arg, events.queue[i].button.button, (byte)events.queue[i].button.down );
 			break;
+		case event_ondestroy:
+			host.skip_configs = true; // skip config save, because engine may be killed during config save
+			Sys_Quit();
+			break;
+		case event_onpause:
+			switch( host.state )
+			{
+			case HOST_INIT:
+			case HOST_CRASHED:
+			case HOST_ERR_FATAL:
+				MsgDev( D_WARN, "Abnormal host state during onPause (%d), skipping config save!\n", host.state );
+				break;
+			default:
+				// restore all latched cheat cvars
+				Cvar_SetCheatState( true );
+				Host_WriteConfig();
+			}
+			// stop blocking UI thread
+			(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.notify );
+			break;
+		case event_onstop:
+			// don't do anything.
+			// it's unsafe to move config save here
+			// but also we don't need to stop engine here
+
+			// stop blocking UI thread
+			(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.notify );
+			break;
 		}
 	}
 
@@ -364,7 +398,12 @@ nativeString
 nativeSetPause
 =====================================================
 */
-JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_nativeInit(JNIEnv* env, jclass cls, jobject array)
+#define DECLARE_JNI_INTERFACE( ret, name, ... ) \
+	JNIEXPORT ret JNICALL Java_in_celest_xash3d_XashActivity_##name( JNIEnv *env, jclass clazz, __VA_ARGS__ )
+#define DECLARE_JNI_INTERFACE_VOID( ret, name ) \
+	JNIEXPORT ret JNICALL Java_in_celest_xash3d_XashActivity_##name( JNIEnv *env, jclass clazz )
+
+DECLARE_JNI_INTERFACE( int, nativeInit, jobject array )
 {
 	int i;
 	int argc;
@@ -405,6 +444,7 @@ JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_nativeInit(JNIEnv* env, jclas
 	jni.messageBox = (*env)->GetStaticMethodID(env, jni.actcls, "messageBox", "(Ljava/lang/String;Ljava/lang/String;)V");
 	jni.createGLContext = (*env)->GetStaticMethodID(env, jni.actcls, "createGLContext", "()Z");
 	jni.deleteGLContext = (*env)->GetStaticMethodID(env, jni.actcls, "deleteGLContext", "()Z");
+	jni.notify = (*env)->GetStaticMethodID(env, jni.actcls, "engineThreadNotify", "()V");
 
 	nanoGL_Init();
 	/* Run the application. */
@@ -419,7 +459,7 @@ JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_nativeInit(JNIEnv* env, jclas
 	return status;
 }
 
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_onNativeResize( JNIEnv* env, jclass cls, jint width, jint height )
+DECLARE_JNI_INTERFACE( void, onNativeResize, jint width, jint height )
 {
 	event_t *event;
 
@@ -434,10 +474,11 @@ JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_onNativeResize( JNIEnv* env,
 	Android_PushEvent();
 }
 
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeQuit(JNIEnv* env, jclass cls)
+DECLARE_JNI_INTERFACE_VOID( void, nativeQuit )
 {
 }
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeSetPause(JNIEnv* env, jclass cls, jint pause )
+
+DECLARE_JNI_INTERFACE( void, nativeSetPause, jint pause )
 {
 	event_t *event = Android_AllocEvent();
 	event->type = event_set_pause;
@@ -455,7 +496,7 @@ JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeSetPause(JNIEnv* env, 
 	}
 }
 
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeKey(JNIEnv* env, jclass cls, jint down, jint code)
+DECLARE_JNI_INTERFACE( void, nativeKey, jint down, jint code )
 {
 	event_t *event;
 
@@ -474,7 +515,7 @@ JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeKey(JNIEnv* env, jclas
 	Android_PushEvent();
 }
 
-void Java_in_celest_xash3d_XashActivity_nativeString(JNIEnv* env, jclass cls, jobject string)
+DECLARE_JNI_INTERFACE( void, nativeString, jobject string )
 {
 	char* str = (char *) (*env)->GetStringUTFChars(env, string, NULL);
 
@@ -486,9 +527,9 @@ void Java_in_celest_xash3d_XashActivity_nativeString(JNIEnv* env, jclass cls, jo
 }
 
 #ifdef SOFTFP_LINK
-void Java_in_celest_xash3d_XashActivity_nativeTouch(JNIEnv* env, jclass cls, jint finger, jint action, jfloat x, jfloat y ) __attribute__((pcs("aapcs")));
+DECLARE_JNI_INTERFACE( void, nativeTouch, jint finger, jint action, jfloat x, jfloat y ) __attribute__((pcs("aapcs")));
 #endif
-void Java_in_celest_xash3d_XashActivity_nativeTouch(JNIEnv* env, jclass cls, jint finger, jint action, jfloat x, jfloat y )
+DECLARE_JNI_INTERFACE( void, nativeTouch, jint finger, jint action, jfloat x, jfloat y )
 {
 	float dx, dy;
 	event_t *event;
@@ -538,19 +579,6 @@ void Java_in_celest_xash3d_XashActivity_nativeTouch(JNIEnv* env, jclass cls, jin
 	event->touch.dy = dy;
 	Android_PushEvent();
 }
-
-JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_setenv( JNIEnv* env, jclass clazz, jstring key, jstring value, jboolean overwrite )
-{
-	char* k = (char *) (*env)->GetStringUTFChars(env, key, NULL);
-	char* v = (char *) (*env)->GetStringUTFChars(env, value, NULL);
-	int err = setenv(k, v, overwrite);
-	(*env)->ReleaseStringUTFChars(env, key, k);
-	(*env)->ReleaseStringUTFChars(env, value, v);
-	return err;
-}
-
-#define DECLARE_JNI_INTERFACE( ret, name, ... ) \
-	JAVA_EXPORT ret Java_in_celest_xash3d_XashActivity_##name( JNIEnv *env, jclass clazz, __VA_ARGS__ )
 
 DECLARE_JNI_INTERFACE( void, nativeBall, jint id, jbyte ball, jshort xrel, jshort yrel )
 {
@@ -622,6 +650,72 @@ DECLARE_JNI_INTERFACE( void, nativeJoyDel, jint id )
 	event->arg = id;
 	Android_PushEvent();
 }
+
+DECLARE_JNI_INTERFACE_VOID( void, nativeOnStop )
+{
+	event_t *event = Android_AllocEvent();
+	event->type = event_onstop;
+	Android_PushEvent();
+}
+
+DECLARE_JNI_INTERFACE_VOID( void, nativeOnPause )
+{
+	event_t *event = Android_AllocEvent();
+	event->type = event_onpause;
+	Android_PushEvent();
+}
+
+DECLARE_JNI_INTERFACE_VOID( void, nativeOnDestroy )
+{
+	event_t *event = Android_AllocEvent();
+	event->type = event_ondestroy;
+	Android_PushEvent();
+}
+
+DECLARE_JNI_INTERFACE( int, setenv, jstring key, jstring value, jboolean overwrite )
+{
+	char* k = (char *) (*env)->GetStringUTFChars(env, key, NULL);
+	char* v = (char *) (*env)->GetStringUTFChars(env, value, NULL);
+	int err = setenv(k, v, overwrite);
+	(*env)->ReleaseStringUTFChars(env, key, k);
+	(*env)->ReleaseStringUTFChars(env, value, v);
+	return err;
+}
+
+DECLARE_JNI_INTERFACE( int, nativeTestWritePermission, jstring jPath )
+{
+	char *path = (char *)(*env)->GetStringUTFChars(env, jPath, NULL);
+	FILE *fd;
+	char testFile[PATH_MAX];
+	int ret = 0;
+	
+	// maybe generate new file everytime?
+	Q_snprintf( testFile, PATH_MAX, "%s/.testfile", path );
+	
+	fd = fopen( testFile, "w+" );
+	
+	if( fd )
+	{
+		ret = 1;
+		fclose( fd );
+		
+		remove( testFile );
+	}
+	else
+	{
+		__android_log_print( ANDROID_LOG_VERBOSE, "Xash", "nativeTestWritePermission: file=%s, error=%s", testFile, strerror( errno ) );
+	}
+	
+	(*env)->ReleaseStringUTFChars( env, jPath, path );
+	
+	return ret;
+}
+
+JNIEXPORT jint JNICALL JNI_OnLoad( JavaVM *vm, void *reserved )
+{
+	return JNI_VERSION_1_6;
+}
+
 
 /*
 ========================
@@ -762,6 +856,31 @@ void Android_Vibrate( float life, char flags )
 		(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.vibrate, (int)life );
 }
 
+/*
+========================
+Android_GetNativeObject
+========================
+*/
+void *Android_GetNativeObject( const char *objName )
+{
+	static const char *availObjects[] = { "JNIEnv", "ActivityClass", NULL };
+	void *object = NULL;
+	
+	if( !objName )
+	{
+		object = (void*)availObjects;
+	}
+	else if( !strcasecmp( objName, "JNIEnv" ) )
+	{
+		object = (void*)jni.env;
+	}
+	else if( !strcasecmp( objName, "ActivityClass" ) )
+	{
+		object = (void*)jni.actcls;
+	}
+	
+	return object;
+}
 
 /*
 ========================
@@ -789,5 +908,7 @@ void Android_SwapInterval( int interval )
 	if( negl.valid )
 		eglSwapInterval( negl.dpy, interval );
 }
+
+
 
 #endif

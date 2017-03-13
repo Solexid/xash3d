@@ -117,7 +117,7 @@ cl_entity_t *GAME_EXPORT CL_GetEntityByIndex( int index )
 		return cl.world;
 
 	if( index < 0 )
-		return clgame.dllFuncs.pfnGetUserEntity( abs( index ));
+		return clgame.dllFuncs.pfnGetUserEntity( -index );
 
 	if( index >= clgame.maxEntities )
 		return NULL;
@@ -402,11 +402,37 @@ void SPR_AdjustSize( float *x, float *y, float *w, float *h )
 {
 	float	xscale, yscale;
 
-	if( !x && !y && !w && !h ) return;
+	ASSERT( x || y || w || h );
 
 	// scale for screen sizes
-	xscale = scr_width->integer / (float)clgame.scrInfo.iWidth;
-	yscale = scr_height->integer / (float)clgame.scrInfo.iHeight;
+	xscale = scr_width->value / (float)clgame.scrInfo.iWidth;
+	yscale = scr_height->value / (float)clgame.scrInfo.iHeight;
+
+	if( x ) *x *= xscale;
+	if( y ) *y *= yscale;
+
+	if( w ) *w *= xscale;
+	if( h ) *h *= yscale;
+}
+
+/*
+====================
+TextAdjustSize
+
+draw hudsprite routine
+====================
+*/
+void TextAdjustSize( int *x, int *y, int *w, int *h )
+{
+	float	xscale, yscale;
+
+	ASSERT( x || y || w || h );
+
+	if( !clgame.ds.adjust_size ) return;
+
+	// scale for screen sizes
+	xscale = scr_width->value / (float)clgame.scrInfo.iWidth;
+	yscale = scr_height->value / (float)clgame.scrInfo.iHeight;
 
 	if( x ) *x *= xscale;
 	if( y ) *y *= yscale;
@@ -429,8 +455,8 @@ void PicAdjustSize( float *x, float *y, float *w, float *h )
 	if( !x && !y && !w && !h ) return;
 
 	// scale for screen sizes
-	xscale = scr_width->integer / (float)clgame.scrInfo.iWidth;
-	yscale = scr_height->integer / (float)clgame.scrInfo.iHeight;
+	xscale = scr_width->value / (float)clgame.scrInfo.iWidth;
+	yscale = scr_height->value / (float)clgame.scrInfo.iHeight;
 
 	if( x ) *x *= xscale;
 	if( y ) *y *= yscale;
@@ -888,8 +914,8 @@ void CL_DrawCrosshair( void )
 		VectorAdd( cl.refdef.vieworg, forward, point );
 		R_WorldToScreen( point, screen );
 
-		x += 0.5f * screen[0] * scr_width->integer + 0.5f;
-		y += 0.5f * screen[1] * scr_height->integer + 0.5f;
+		x += 0.5f * screen[0] * scr_width->value + 0.5f;
+		y += 0.5f * screen[1] * scr_height->value + 0.5f;
 	}
 
 	clgame.ds.pSprite = clgame.ds.pCrosshair;
@@ -918,8 +944,8 @@ static void CL_DrawLoading( float percent )
 	x = ( clgame.scrInfo.iWidth - width ) >> 1;
 	y = ( clgame.scrInfo.iHeight - height) >> 1;
 
-	xscale = scr_width->integer / (float)clgame.scrInfo.iWidth;
-	yscale = scr_height->integer / (float)clgame.scrInfo.iHeight;
+	xscale = scr_width->value / (float)clgame.scrInfo.iWidth;
+	yscale = scr_height->value / (float)clgame.scrInfo.iHeight;
 
 	x *= xscale;
 	y *= yscale;
@@ -927,7 +953,7 @@ static void CL_DrawLoading( float percent )
 	height *= yscale;
 
 	if( cl_allow_levelshots->integer )
-          {
+	{
 		pglColor4ub( 128, 128, 128, 255 );
 		GL_SetRenderMode( kRenderTransTexture );
 		R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, cls.loadingBar );
@@ -966,8 +992,8 @@ static void CL_DrawPause( void )
 	x = ( clgame.scrInfo.iWidth - width ) >> 1;
 	y = ( clgame.scrInfo.iHeight - height) >> 1;
 
-	xscale = scr_width->integer / (float)clgame.scrInfo.iWidth;
-	yscale = scr_height->integer / (float)clgame.scrInfo.iHeight;
+	xscale = scr_width->value / (float)clgame.scrInfo.iWidth;
+	yscale = scr_height->value / (float)clgame.scrInfo.iHeight;
 
 	x *= xscale;
 	y *= yscale;
@@ -1015,6 +1041,15 @@ void CL_DrawHUD( int state )
 	}
 }
 
+static void CL_ClearUserMessage( char *pszName, int svc_num )
+{
+	int i;
+
+	for( i = 0; i < MAX_USER_MESSAGES && clgame.msg[i].name[0]; i++ )
+		if( ( clgame.msg[i].number == svc_num ) && Q_strcmp( clgame.msg[i].name, pszName ) )
+			clgame.msg[i].number = 0;
+}
+
 void CL_LinkUserMessage( char *pszName, const int svc_num, int iSize )
 {
 	int	i;
@@ -1033,6 +1068,7 @@ void CL_LinkUserMessage( char *pszName, const int svc_num, int iSize )
 		{
 			clgame.msg[i].number = svc_num;
 			clgame.msg[i].size = iSize;
+			CL_ClearUserMessage( pszName, svc_num );
 			return;
 		}
 	}
@@ -1047,6 +1083,7 @@ void CL_LinkUserMessage( char *pszName, const int svc_num, int iSize )
 	Q_strncpy( clgame.msg[i].name, pszName, sizeof( clgame.msg[i].name ));
 	clgame.msg[i].number = svc_num;
 	clgame.msg[i].size = iSize;
+	CL_ClearUserMessage( pszName, svc_num );
 }
 
 void CL_FreeEntity( cl_entity_t *pEdict )
@@ -1457,8 +1494,8 @@ int GAME_EXPORT pfnGetScreenInfo( SCREENINFO *pscrinfo )
 	
 	if( scale_factor && scale_factor != 1.0f)
 	{
-		clgame.scrInfo.iWidth = scr_width->integer/scale_factor;
-		clgame.scrInfo.iHeight = scr_height->integer/scale_factor;
+		clgame.scrInfo.iWidth = scr_width->value / scale_factor;
+		clgame.scrInfo.iHeight = scr_height->value / scale_factor;
 		clgame.scrInfo.iFlags |= SCRINFO_STRETCHED;
 	}
 	else

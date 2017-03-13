@@ -17,6 +17,7 @@ GNU General Public License for more details.
 #include "server.h"
 #include "library.h"
 #include "Sequence.h"
+#include "net_encode.h"
 
 int SV_UPDATE_BACKUP = SINGLEPLAYER_BACKUP;
 
@@ -663,6 +664,12 @@ void SV_InitGame( void )
 
 		// make sure the client is down
 		CL_Drop();
+
+		Delta_Init ();
+
+		// register custom encoders
+		svgame.dllFuncs.pfnRegisterEncoders();
+
 	}
 
 	// now apply latched commands

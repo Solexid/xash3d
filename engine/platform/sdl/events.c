@@ -10,6 +10,7 @@
 #include "touch.h"
 #include "joyinput.h"
 #include "sound.h"
+#include "gl_vidnt.h"
 
 extern convar_t *vid_fullscreen;
 extern convar_t *snd_mute_losefocus;
@@ -323,6 +324,8 @@ void SDLash_EventFilter( void *ev )
 		break;
 
 	case SDL_WINDOWEVENT:
+		if( event->window.windowID != SDL_GetWindowID( host.hWnd ) )
+			return;
 		if( ( host.state == HOST_SHUTDOWN ) ||
 			( host.type  == HOST_DEDICATED ) )
 			break; // no need to activate
@@ -339,6 +342,7 @@ void SDLash_EventFilter( void *ev )
 			host.state = HOST_FRAME;
 			host.force_draw_version = true;
 			host.force_draw_version_time = host.realtime + 2;
+			VID_SetMode();
 			break;
 		case SDL_WINDOWEVENT_FOCUS_GAINED:
 			host.state = HOST_FRAME;
@@ -349,9 +353,11 @@ void SDLash_EventFilter( void *ev )
 			}
 			host.force_draw_version = true;
 			host.force_draw_version_time = host.realtime + 2;
+			VID_SetMode();
 			break;
 		case SDL_WINDOWEVENT_MINIMIZED:
 			host.state = HOST_SLEEP;
+			VID_RestoreScreenResolution();
 			break;
 		case SDL_WINDOWEVENT_FOCUS_LOST:
 
@@ -370,6 +376,7 @@ void SDLash_EventFilter( void *ev )
 			}
 			host.force_draw_version = true;
 			host.force_draw_version_time = host.realtime + 1;
+			VID_RestoreScreenResolution();
 			break;
 		case SDL_WINDOWEVENT_CLOSE:
 			Sys_Quit();

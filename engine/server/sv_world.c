@@ -1601,9 +1601,19 @@ void SV_RunLightStyles( void )
 		ls->time += sv.frametime;
 		ofs = (ls->time * 10);
 
-		if( ls->length == 0 ) ls->value = scale; // disable this light
-		else if( ls->length == 1 ) ls->value = ( ls->map[0] / 12.0f ) * scale;
-		else ls->value = ( ls->map[ofs % ls->length] / 12.0f ) * scale;
+		if( ls->length == 0 )
+		{
+			ls->value = scale; // disable this light
+		}
+		else if( ls->length == 1 )
+		{
+			ls->value = ( ls->map[0] / 12.0f ) * scale;
+		}
+		else
+		{
+			ofs = (ls->time * 10);
+			ls->value = ( ls->map[ofs % ls->length] / 12.0f ) * scale;
+		}
 	}
 }
 

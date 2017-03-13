@@ -1085,7 +1085,7 @@ void CL_ServerInfo( sizebuf_t *msg )
 
 	Q_strncpy( key, MSG_ReadString( msg ), sizeof( key ));
 	Q_strncpy( value, MSG_ReadString( msg ), sizeof( value ));
-	Info_SetValueForKey( cl.serverinfo, key, value );
+	Info_SetValueForKey( cl.serverinfo, key, value, sizeof( cl.serverinfo ) );
 }
 
 /*
@@ -1293,7 +1293,7 @@ int CL_ParseScreenFade( const char *pszName, int iSize, void *pbuf )
 	// set longfade scale and multiply times
 	if( sf->fadeFlags & FFADE_LONGFADE )
 		scale = 1 / 256.0f;
-	else scale = 1 / 1024.0f;
+	else scale = 1 / 4096.0f;
 
 	duration *= scale;
 	holdTime *= scale;

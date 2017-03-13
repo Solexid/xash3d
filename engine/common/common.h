@@ -46,9 +46,6 @@ extern "C" {
 #endif
 
 #ifndef _WIN32
-#ifdef __linux__
-#include <linux/limits.h> // PATH_MAX
-#endif
 #include <stddef.h> // size_t
 #include <stdio.h> // off_t
 #include <stdarg.h> // va_list
@@ -411,6 +408,7 @@ typedef struct host_parm_s
 	qboolean		force_draw_version;	// used when fraps is loaded
 	qboolean		write_to_clipboard;	// put image to clipboard instead of disk
 	qboolean		crashed;		// set to true if crashed
+	qboolean		skip_configs;	// skip config save during Host_Shutdown
 	double	force_draw_version_time; // time when disable force_draw_version
 
 	char		rootdir[256];	// member root directory
@@ -985,7 +983,7 @@ void UI_NXPrintf( struct con_nprint_s *info, char *fmt, ... ) _format(2);
 char *Info_ValueForKey( const char *s, const char *key );
 void Info_RemovePrefixedKeys( char *start, char prefix );
 qboolean Info_RemoveKey( char *s, const char *key );
-qboolean Info_SetValueForKey( char *s, const char *key, const char *value );
+qboolean Info_SetValueForKey( char *s, const char *key, const char *value, size_t maxsize );
 qboolean Info_SetValueForStarKey( char *s, const char *key, const char *value, int maxsize );
 qboolean Info_Validate( const char *s );
 void Info_Print( const char *s );
@@ -1016,6 +1014,7 @@ void HTTP_ResetProcessState ( void );
 void HTTP_Init( void );
 void HTTP_Shutdown( void );
 void HTTP_Run( void );
+void HTTP_ClearCustomServers( void );
 void CL_ProcessFile( qboolean successfully_received, const char *filename );
 
 typedef struct autocomplete_list_s

@@ -720,7 +720,7 @@ Con_TextAdjustSize
 draw charcters routine
 ====================
 */
-static void Con_TextAdjustSize( int *x, int *y, int *w, int *h )
+static void Con_TextAdjustSize( int *x, int *y, float *w, float *h )
 {
 	float	xscale, yscale;
 
@@ -762,8 +762,9 @@ int Con_UtfMoveRight( char *str, int pos, int length )
 
 int Con_DrawGenericChar( int x, int y, int number, rgba_t color )
 {
-	int	width, height;
+	float	width, height;
 	float	s1, t1, s2, t2;
+	int w, h;
 	wrect_t	*rc;
 
 	number &= 255;
@@ -780,19 +781,19 @@ int Con_DrawGenericChar( int x, int y, int number, rgba_t color )
 	rc = &con.curFont->fontRc[number];
 
 	pglColor4ubv( color );
-	R_GetTextureParms( &width, &height, con.curFont->hFontTexture );
+	R_GetTextureParms( &w, &h, con.curFont->hFontTexture );
 
 	// calc rectangle
-	s1 = (float)rc->left / width;
-	t1 = (float)rc->top / height;
-	s2 = (float)rc->right / width;
-	t2 = (float)rc->bottom / height;
+	s1 = (float)rc->left / (float)w;
+	t1 = (float)rc->top / (float)h;
+	s2 = (float)rc->right / (float)w;
+	t2 = (float)rc->bottom / (float)h;
 	width = (rc->right - rc->left) * con_fontscale->value;
 	height = (rc->bottom - rc->top) * con_fontscale->value;
 
 	if( clgame.ds.adjust_size )
 		Con_TextAdjustSize( &x, &y, &width, &height );
-	R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, con.curFont->hFontTexture );		
+	R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, con.curFont->hFontTexture );
 	pglColor4ub( 255, 255, 255, 255 ); // don't forget reset color
 
 	return con.curFont->charWidths[number];
@@ -1944,13 +1945,37 @@ void Con_DrawSolidConsole( int lines )
 	int	i, x, y;
 	float	fraction;
 	int	start;
+	int alpha;
+	qboolean fill;
 
 	if( lines <= 0 ) return;
 
+	fill = ( lines == scr_height->integer );
+
 	// draw the background
-	GL_SetRenderMode( kRenderNormal );
+	if( fill )
+	{
+		GL_SetRenderMode( kRenderNormal );
+		alpha = 255;
+	}
+	else
+	{
+		GL_SetRenderMode( kRenderTransTexture );
+		alpha = 255 * con_alpha->value;
+	}
+
+	if( con_black->integer )
+	{
+		pglColor4ub( 0, 0, 0, alpha );
+		R_DrawStretchPic( 0, lines - scr_height->integer, scr_width->integer, scr_height->integer, 0, 0, 1, 1, cls.fillImage );
+	}
+	else
+	{
+		pglColor4ub( 255, 255, 255, alpha );
+		R_DrawStretchPic( 0, lines - scr_height->integer, scr_width->integer, scr_height->integer, 0, 0, 1, 1, con.background );
+	}
+
 	pglColor4ub( 255, 255, 255, 255 ); // to prevent grab color from screenfade
-	R_DrawStretchPic( 0, lines - scr_height->integer, scr_width->integer, scr_height->integer, 0, 0, 1, 1, con.background );
 
 	if( !con.curFont || host.developer <= 0 )
 		return; // nothing to draw
