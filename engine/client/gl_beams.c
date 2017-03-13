@@ -89,11 +89,11 @@ static cl_entity_t *CL_GetBeamEntityByIndex( int index )
 	return ent;
 }
 
-void BeamNormalizeColor( BEAM *pBeam, int r, int g, int b, float brightness )
+void BeamNormalizeColor( BEAM *pBeam, float r, float g, float b, float brightness )
 {
-	pBeam->r = (float)r;
-	pBeam->g = (float)g;
-	pBeam->b = (float)b;
+	pBeam->r = r;
+	pBeam->g = g;
+	pBeam->b = b;
 	pBeam->brightness = brightness;
 }
 
@@ -193,6 +193,9 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 	if( !m_hSprite || segments < 2  )
 		return;
 
+	if( segments > NOISE_DIVISIONS )
+		segments = NOISE_DIVISIONS;
+
 	length = VectorLength( delta );
 	flMaxWidth = width * 0.5f;
 	div = 1.0f / ( segments - 1 );
@@ -201,13 +204,13 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 	{
 		// Here, we have too many segments; we could get overlap... so lets have less segments
 		segments = (int)( length / ( flMaxWidth * 1.414f )) + 1;
-		if( segments < 2 ) segments = 2;
+		if( segments < 2 )
+			segments = 2;
+
+		div = 1.0f / (segments - 1);
 	}
 
-	if( segments > NOISE_DIVISIONS )
-		segments = NOISE_DIVISIONS;
 
-	div = 1.0f / (segments - 1);
 	length *= 0.01f;
 	vStep = length * div;	// Texture length texels per space pixel
 
@@ -222,7 +225,7 @@ static void CL_DrawSegs( int modelIndex, float frame, int rendermode, const vec3
 			div = 1.0f / ( segments - 1 );
 		}
 		scale *= 10;
-		length = segments * ( 1.0f / 10 );
+		length = segments * 0.1f;
 	}
 	else
 	{
@@ -1450,6 +1453,12 @@ void CL_DrawBeam( BEAM *pbeam )
 		VectorScale( color, ( pbeam->brightness / 255.0f ), color );
 		VectorScale( color, ( 1.0f / 255.0f ), color );
 	}
+#if 0
+	else
+	{
+		VectorScale( color, ( pbeam->brightness / 255.0f ), color );
+	}
+#endif
 
 	switch( pbeam->type )
 	{
