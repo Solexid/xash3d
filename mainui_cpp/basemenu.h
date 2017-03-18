@@ -146,15 +146,45 @@ enum menuEvent_e
 #define SET_EVENT_THIS_VOID( callback, func ) struct __this##callback {\
 	static void callback( CMenuBaseItem *pSelf, void *pExtra ) { (func)(); } };\
 	this->callback = __this##callback::callback
+
+#define SET_EVENT_CMD( item, callback, cmd, execute_now ) \
+	struct __##item##callback \
+	{\
+		static void callback( CMenuBaseItem *pSelf, void *pExtra ) \
+		{ \
+			EngFuncs::ClientCmd( (execute_now), (cmd) );
+		} \
+	};\
+	(item).callback = __##item##callback::callback
+#define SET_EVENT_THIS_CMD( callback, cmd, execute_now ) \
+	struct __this##callback \
+	{\
+		static void callback( CMenuBaseItem *pSelf, void *pExtra ) \
+		{ \
+			EngFuncs::ClientCmd( (execute_now), (cmd) );
+		} \
+	}; \
+	this->callback = __this##callback::callback
 #else
 #define SET_EVENT( item, callback ) (item).callback = [](CMenuBaseItem *pSelf, void *pExtra)
 #define END_EVENT( item, callback ) ;
 
-#define SET_EVENT_THIS( callback ) this->callback = [](CMenuBaseItem *pSelf, void *pExtra)
-#define END_EVENT_THIS( callback ) ;
+#define SET_EVENT_THIS( callback ) SET_EVENT( (*this), callback )
+#define END_EVENT_THIS( callback ) END_EVENT( (*this), callback )
 
-#define SET_EVENT_VOID( item, callback, func ) (item).callback = [](CMenuBaseItem *pSelf, void *pExtra) { (func)(); };
-#define SET_EVENT_THIS_VOID( item, callback, func ) this->callback = [](CMenuBaseItem *pSelf, void *pExtra) { (func)(); };
+#define SET_EVENT_VOID( item, callback, func ) \
+	(item).callback = [](CMenuBaseItem *pSelf, void *pExtra) \
+	{ \
+		(func)(); \
+	}
+#define SET_EVENT_THIS_VOID( item, callback, func ) SET_EVENT_VOID( (*this), callback, func )
+
+#define SET_EVENT_CMD( item, callback, cmd, execute_now ) \
+	(item).callback = [](CMenuBaseItem *pSelf, void *pExtra) \
+	{ \
+		EngFuncs::ClientCmd( (execute_now), (cmd) ); \
+	}
+#define SET_EVENT_THIS_CMD( callback, cmd, execute_now ) SET_EVENT_CMD( (*this), callback, cmd, execute_now )
 
 #endif
 

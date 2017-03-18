@@ -43,15 +43,14 @@ public:
 	virtual const char *Key( int key, int down );
 	virtual void Activate( );
 
-	void QuitDialog( void );
-	void PromptDialog( void );
-	void ShowPrompt( void ( *action )( void ), const char *message );
+	static void QuitDialog( CMenuBaseItem *pSelf, void *pExtra );
+	static void PromptDialog( CMenuBaseItem *pSelf, void *pExtra );
 
-	CMenuPicButton	console;
 private:
 	virtual void _Init();
 	virtual void _VidInit( );
 
+	CMenuPicButton	console;
 	class CMenuMainBackground : public CMenuBackgroundBitmap
 	{
 	public:
@@ -114,46 +113,49 @@ void CMenuMain::CMenuMainBackground::Draw( )
 	EngFuncs::DrawLogo( "logo.avi", 0, logoPosY, logoWidth, logoHeight );
 }
 
-void CMenuMain::QuitDialog( void )
+void CMenuMain::QuitDialog(CMenuBaseItem *pSelf , void *pExtra)
 {
+	CMenuMain *parent = (CMenuMain*)pSelf->Parent();
+
 	// toggle main menu between active\inactive
 	// show\hide quit dialog
-	console.Flags() ^= QMF_INACTIVE;
-	resumeGame.Flags() ^= QMF_INACTIVE;
-	disconnect.Flags() ^= QMF_INACTIVE;
-	newGame.Flags() ^= QMF_INACTIVE;
-	hazardCourse.Flags() ^= QMF_INACTIVE;
-	saveRestore.Flags() ^= QMF_INACTIVE;
-	configuration.Flags() ^= QMF_INACTIVE;
-	multiPlayer.Flags() ^= QMF_INACTIVE;
-	customGame.Flags() ^= QMF_INACTIVE;
-	previews.Flags() ^= QMF_INACTIVE;
-	quit.Flags() ^= QMF_INACTIVE;
-	minimizeBtn.Flags() ^= QMF_INACTIVE;
-	quitButton.Flags() ^= QMF_INACTIVE;
+	parent->console.Flags() ^= QMF_INACTIVE;
+	parent->resumeGame.Flags() ^= QMF_INACTIVE;
+	parent->disconnect.Flags() ^= QMF_INACTIVE;
+	parent->newGame.Flags() ^= QMF_INACTIVE;
+	parent->hazardCourse.Flags() ^= QMF_INACTIVE;
+	parent->saveRestore.Flags() ^= QMF_INACTIVE;
+	parent->configuration.Flags() ^= QMF_INACTIVE;
+	parent->multiPlayer.Flags() ^= QMF_INACTIVE;
+	parent->customGame.Flags() ^= QMF_INACTIVE;
+	parent->previews.Flags() ^= QMF_INACTIVE;
+	parent->quit.Flags() ^= QMF_INACTIVE;
+	parent->minimizeBtn.Flags() ^= QMF_INACTIVE;
+	parent->quitButton.Flags() ^= QMF_INACTIVE;
 
-	quitDialog.ToggleVisibility();
+	parent->quitDialog.ToggleVisibility();
 }
 
-void CMenuMain::PromptDialog( void )
+void CMenuMain::PromptDialog( CMenuBaseItem *pSelf , void *pExtra)
 {
+	CMenuMain *parent = (CMenuMain*)pSelf->Parent();
 	// toggle main menu between active\inactive
 	// show\hide quit dialog
-	console.Flags() ^= QMF_INACTIVE;
-	resumeGame.Flags() ^= QMF_INACTIVE;
-	disconnect.Flags() ^= QMF_INACTIVE;
-	newGame.Flags() ^= QMF_INACTIVE;
-	hazardCourse.Flags() ^= QMF_INACTIVE;
-	saveRestore.Flags() ^= QMF_INACTIVE;
-	configuration.Flags() ^= QMF_INACTIVE;
-	multiPlayer.Flags() ^= QMF_INACTIVE;
-	customGame.Flags() ^= QMF_INACTIVE;
-	previews.Flags() ^= QMF_INACTIVE;
-	quit.Flags() ^= QMF_INACTIVE;
-	minimizeBtn.Flags() ^= QMF_INACTIVE;
-	quitButton.Flags() ^= QMF_INACTIVE;
+	parent->console.Flags() ^= QMF_INACTIVE;
+	parent->resumeGame.Flags() ^= QMF_INACTIVE;
+	parent->disconnect.Flags() ^= QMF_INACTIVE;
+	parent->newGame.Flags() ^= QMF_INACTIVE;
+	parent->hazardCourse.Flags() ^= QMF_INACTIVE;
+	parent->saveRestore.Flags() ^= QMF_INACTIVE;
+	parent->configuration.Flags() ^= QMF_INACTIVE;
+	parent->multiPlayer.Flags() ^= QMF_INACTIVE;
+	parent->customGame.Flags() ^= QMF_INACTIVE;
+	parent->previews.Flags() ^= QMF_INACTIVE;
+	parent->quit.Flags() ^= QMF_INACTIVE;
+	parent->minimizeBtn.Flags() ^= QMF_INACTIVE;
+	parent->quitButton.Flags() ^= QMF_INACTIVE;
 
-	disconnectDialog.ToggleVisibility();
+	parent->disconnectDialog.ToggleVisibility();
 }
 
 /*
@@ -168,13 +170,16 @@ const char *CMenuMain::Key( int key, int down )
 		if ( CL_IsActive( ))
 		{
 			if( !(quitDialog.Flags() & QMF_HIDDEN ) )
-				QuitDialog();
+			{ }
 			else if( !(disconnectDialog.Flags() & QMF_HIDDEN ) )
-				PromptDialog();
+			{ }
 			else
 				UI_CloseMenu();
 		}
-		else QuitDialog();
+		else
+		{
+			QuitDialog( &quitDialog, NULL );
+		}
 		return uiSoundNull;
 	}
 	return CMenuFramework::Key( key, down );
@@ -243,6 +248,7 @@ void CMenuMain::_Init( void )
 	EngFuncs::PrecacheLogo( "logo.avi" );
 
 	// console
+	console.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW;
 	console.SetNameAndStatus( "Console", "Show console" );
 	SET_EVENT( console, onActivated )
 	{
@@ -250,8 +256,10 @@ void CMenuMain::_Init( void )
 		EngFuncs::KEY_SetDest( KEY_CONSOLE );
 	}
 	END_EVENT( console, onActivated )
+	console.SetPicture( PC_CONSOLE );
 
 	resumeGame.SetNameAndStatus( "Resume Game", MenuStrings[HINT_RESUME_GAME] );
+	resumeGame.SetPicture( PC_RESUME_GAME );
 	SET_EVENT_VOID( resumeGame, onActivated, UI_CloseMenu );
 
 	disconnect.SetNameAndStatus( "Disconnect", "Disconnect from server" );
@@ -259,32 +267,42 @@ void CMenuMain::_Init( void )
 	{
 		uiMain.disconnectDialog.SetMessage( "Really disconnect?" );
 		uiMain.disconnectDialog.onPositive = UI_Main_Disconnect;
-		uiMain.PromptDialog();
+		uiMain.PromptDialog( pSelf, pExtra );
 	}
 	END_EVENT( disconnect, onActivated )
+	disconnect.SetPicture( PC_DISCONNECT );
 
+	newGame.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	newGame.SetNameAndStatus( "New Game", MenuStrings[HINT_NEWGAME] );
+	newGame.SetPicture( PC_NEW_GAME );
 	SET_EVENT_VOID( newGame, onActivated, UI_NewGame_Menu );
 
+	hazardCourse.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	hazardCourse.SetNameAndStatus( "Hazard Course", MenuStrings[HINT_HAZARD_COURSE] );
+	hazardCourse.SetPicture( PC_HAZARD_COURSE );
 	SET_EVENT( hazardCourse, onActivated )
 	{
 		if( CL_IsActive() )
 		{
 			uiMain.disconnectDialog.SetMessage( MenuStrings[HINT_RESTART_HZ] );
 			uiMain.disconnectDialog.onPositive = UI_Main_HazardCourse;
-			uiMain.PromptDialog();
+			uiMain.PromptDialog( pSelf, pExtra );
 		}
 		else UI_Main_HazardCourse( &uiMain.hazardCourse, NULL );
 	}
 	END_EVENT( hazardCourse, onActivated )
 
+	multiPlayer.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	multiPlayer.SetNameAndStatus( "Multiplayer", MenuStrings[HINT_MULTIPLAYER] );
 	// multiPlayer.onActivated = UI_MultiPlayer_Menu
+	multiPlayer.SetPicture( PC_MULTIPLAYER );
 
 	configuration.SetNameAndStatus( "Configuration", MenuStrings[HINT_CONFIGURATION] );
-	// configuration.onActivated = UI_Options_Menu;
+	configuration.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
+	configuration.SetPicture( PC_CONFIG );
+	SET_EVENT_VOID( configuration, onActivated, UI_Options_Menu );
 
+	saveRestore.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	SET_EVENT( saveRestore, onActivated )
 	{
 		/*if( CL_IsActive() )
@@ -293,8 +311,11 @@ void CMenuMain::_Init( void )
 	}
 	END_EVENT( saveRestore, onActivated )
 
+
+	customGame.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	customGame.SetNameAndStatus( "Custom Game", MenuStrings[HINT_CUSTOM_GAME] );
 	// customGame.onActivated = UI_CustomGame_Menu;
+	customGame.SetPicture( PC_CUSTOM_GAME );
 
 	previews.SetNameAndStatus( "Previews", MenuStrings[ HINT_PREVIEWS_TEXT ] );
 	SET_EVENT( previews, onActivated )
@@ -304,23 +325,44 @@ void CMenuMain::_Init( void )
 	END_EVENT( previews, onActivated )
 
 	quit.SetNameAndStatus( "Quit", MenuStrings[HINT_QUIT] );
-	SET_EVENT_VOID( quit, onActivated, uiMain.QuitDialog );
+	quit.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
+	quit.onActivated = QuitDialog;
+	quit.SetPicture( PC_QUIT );
 
-	SET_EVENT_VOID( quitButton, onActivated, uiMain.QuitDialog );
+	quitButton.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_MOUSEONLY|QMF_ACT_ONRELEASE;
+	quitButton.SetPicture( ART_CLOSEBTN_N, ART_CLOSEBTN_F, ART_CLOSEBTN_D );
+	quitButton.onActivated = QuitDialog;
 
-	SET_EVENT( minimizeBtn, onActivated )
-	{
-		EngFuncs::ClientCmd( FALSE, "minimize\n" );
-	}
-	END_EVENT( minimizeBtn, onActivated )
+	minimizeBtn.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_MOUSEONLY|QMF_ACT_ONRELEASE;
+	minimizeBtn.SetPicture( ART_MINIMIZE_N, ART_MINIMIZE_F, ART_MINIMIZE_D );
+	SET_EVENT_CMD( minimizeBtn, onActivated, "minimize\n", FALSE );
 
-	SET_EVENT( quitDialog, onPositive )
-	{
-		EngFuncs::ClientCmd( FALSE, "quit\n" );
-	}
-	END_EVENT( quitDialog, onPositive )
 	quitDialog.SetPositiveButton( "Ok", PC_OK );
 	quitDialog.SetNegativeButton("Cancel", PC_CANCEL);
+	quitDialog.onNegative = QuitDialog;
+	SET_EVENT_CMD( quitDialog, onPositive, "quit\n", FALSE );
+
+	disconnectDialog.onNegative = PromptDialog;
+
+	if ( gMenu.m_gameinfo.gamemode == GAME_MULTIPLAYER_ONLY || gMenu.m_gameinfo.startmap[0] == 0 )
+		newGame.Flags() |= QMF_GRAYED;
+
+	if ( gMenu.m_gameinfo.gamemode == GAME_SINGLEPLAYER_ONLY )
+		multiPlayer.Flags() |= QMF_GRAYED;
+
+	if ( gMenu.m_gameinfo.gamemode == GAME_MULTIPLAYER_ONLY )
+	{
+		saveRestore.Flags() |= QMF_GRAYED;
+		hazardCourse.Flags() |= QMF_GRAYED;
+	}
+
+	// server.dll needs for reading savefiles or startup newgame
+	if( !EngFuncs::CheckGameDll( ))
+	{
+		saveRestore.Flags() |= QMF_GRAYED;
+		hazardCourse.Flags() |= QMF_GRAYED;
+		newGame.Flags() |= QMF_GRAYED;
+	}
 
 	AddItem( background );
 
@@ -356,40 +398,14 @@ UI_Main_Init
 */
 void CMenuMain::_VidInit( void )
 {
-	background.Flags() = QMF_INACTIVE;
-
-	console.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW;
 	console.SetCoord( 72, CL_IsActive() ? 130: 230 );
-	console.SetPicture( PC_CONSOLE );
+	resumeGame.SetCoord( 72, 230 );
+	disconnect.SetCoord( 72, 180 );
+	newGame.SetCoord( 72, 280 );
+	hazardCourse.SetCoord( 72, 330 );
 
 	resumeGame.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
-	resumeGame.SetCoord( 72, 230 );
-	resumeGame.SetPicture( PC_RESUME_GAME );
-
 	disconnect.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
-	disconnect.SetCoord( 72, 180 );
-	disconnect.SetPicture( PC_DISCONNECT );
-
-	newGame.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
-	newGame.SetCoord( 72, 280 );
-	newGame.SetPicture( PC_NEW_GAME );
-
-	if ( gMenu.m_gameinfo.gamemode == GAME_MULTIPLAYER_ONLY || !strlen( gMenu.m_gameinfo.startmap ))
-		newGame.Flags() |= QMF_GRAYED;
-
-	hazardCourse.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
-	hazardCourse.SetCoord( 72, 330 );
-	hazardCourse.SetPicture( PC_HAZARD_COURSE );
-
-	saveRestore.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
-
-	// server.dll needs for reading savefiles or startup newgame
-	if( !EngFuncs::CheckGameDll( ))
-	{
-		saveRestore.Flags() |= QMF_GRAYED;
-		hazardCourse.Flags() |= QMF_GRAYED;
-		newGame.Flags() |= QMF_GRAYED;
-	}
 
 	if( CL_IsActive( ))
 	{
@@ -407,27 +423,10 @@ void CMenuMain::_VidInit( void )
 	}
 
 	saveRestore.SetCoord( 72, bTrainMap ? 380 : 330 );
-
-	configuration.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	configuration.SetCoord( 72, bTrainMap ? 430 : 380 );
-	configuration.SetPicture( PC_CONFIG );
-
-	multiPlayer.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	multiPlayer.SetCoord( 72, bTrainMap ? 480 : 430 );
-	multiPlayer.SetPicture( PC_MULTIPLAYER );
 
-	if ( gMenu.m_gameinfo.gamemode == GAME_SINGLEPLAYER_ONLY )
-		multiPlayer.Flags() |= QMF_GRAYED;
-
-	if ( gMenu.m_gameinfo.gamemode == GAME_MULTIPLAYER_ONLY )
-	{
-		saveRestore.Flags() |= QMF_GRAYED;
-		hazardCourse.Flags() |= QMF_GRAYED;
-	}
-
-	customGame.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	customGame.SetCoord( 72, bTrainMap ? 530 : 480 );
-	customGame.SetPicture( PC_CUSTOM_GAME );
 
 	previews.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	previews.SetCoord( 72, (bCustomGame) ? (bTrainMap ? 580 : 530) : (bTrainMap ? 530 : 480) );
@@ -438,17 +437,11 @@ void CMenuMain::_VidInit( void )
 
 	previews.SetPicture( PC_PREVIEWS );
 
-	quit.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	quit.SetCoord( 72, (bCustomGame) ? (bTrainMap ? 630 : 580) : (bTrainMap ? 580 : 530));
-	quit.SetPicture( PC_QUIT );
 
-	minimizeBtn.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_MOUSEONLY|QMF_ACT_ONRELEASE;
 	minimizeBtn.SetRect( uiStatic.width - 72, 13, 32, 32 );
-	minimizeBtn.SetPicture( ART_MINIMIZE_N, ART_MINIMIZE_F, ART_MINIMIZE_D );
 
-	quitButton.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_MOUSEONLY|QMF_ACT_ONRELEASE;
 	quitButton.SetRect( uiStatic.width - 36, 13, 32, 32 );
-	quitButton.SetPicture( ART_CLOSEBTN_N, ART_CLOSEBTN_F, ART_CLOSEBTN_D );
 
 	if( CL_IsActive() )
 		quitDialog.SetMessage( MenuStrings[HINT_QUIT_ACTIVE] );
