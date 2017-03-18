@@ -83,11 +83,11 @@ CMenuOptions::KeyFunc
 */
 const char *CMenuOptions::Key( int key, int down )
 {
-	/*if( down && key == K_ESCAPE && done.Flags() & QMF_INACTIVE )
+	if( down && key == K_ESCAPE && done.Flags() & QMF_INACTIVE )
 	{
-		CheckUpdatesDialog( &done, NULL );	// cancel 'check updates' dialog
+		CheckUpdatesDialog( &msgBox, NULL );	// cancel 'check updates' dialog
 		return uiSoundNull;
-	}*/
+	}
 	return CMenuFramework::Key( key, down );
 }
 
@@ -138,7 +138,8 @@ void CMenuOptions::_Init( void )
 	{
 		EngFuncs::ShellExecute( ((CMenuOptions*)pSelf->Parent())->m_szUpdateUrl, NULL, TRUE );
 	}
-	END_EVENT( update, onPositive )
+	END_EVENT( msgBox, onPositive )
+	msgBox.onNegative = CheckUpdatesDialog;
 
 	if( gMenu.m_gameinfo.update_url[0] != 0 )
 		m_szUpdateUrl = gMenu.m_gameinfo.update_url;

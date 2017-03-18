@@ -294,7 +294,7 @@ void CMenuMain::_Init( void )
 
 	multiPlayer.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	multiPlayer.SetNameAndStatus( "Multiplayer", MenuStrings[HINT_MULTIPLAYER] );
-	// multiPlayer.onActivated = UI_MultiPlayer_Menu
+	SET_EVENT_VOID( multiPlayer, onActivated, UI_MultiPlayer_Menu );
 	multiPlayer.SetPicture( PC_MULTIPLAYER );
 
 	configuration.SetNameAndStatus( "Configuration", MenuStrings[HINT_CONFIGURATION] );

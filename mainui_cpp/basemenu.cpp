@@ -1670,13 +1670,13 @@ void UI_Init( void )
 	EngFuncs::Cmd_AddCommand( "menu_main", UI_Main_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_newgame", UI_NewGame_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_options", UI_Options_Menu );
+	EngFuncs::Cmd_AddCommand( "menu_multiplayer", UI_MultiPlayer_Menu );
+	EngFuncs::Cmd_AddCommand( "menu_langame", UI_LanGame_Menu );
+	EngFuncs::Cmd_AddCommand( "menu_internetgames", UI_InternetGames_Menu );
 	/*
 	EngFuncs::Cmd_AddCommand( "menu_loadgame", UI_LoadGame_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_savegame", UI_SaveGame_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_saveload", UI_SaveLoad_Menu );
-	EngFuncs::Cmd_AddCommand( "menu_multiplayer", UI_MultiPlayer_Menu );
-	EngFuncs::Cmd_AddCommand( "menu_langame", UI_LanGame_Menu );
-	EngFuncs::Cmd_AddCommand( "menu_internetgames", UI_InternetGames_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_playersetup", UI_PlayerSetup_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_controls", UI_Controls_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_advcontrols", UI_AdvControls_Menu );

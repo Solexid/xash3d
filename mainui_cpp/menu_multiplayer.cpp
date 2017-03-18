@@ -102,7 +102,7 @@ void CMenuMultiplayer::_Init( void )
 	internetGames.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	internetGames.SetNameAndStatus( "Internet game", "View list of a game internet servers and join the one of your choice" );
 	internetGames.SetPicture( PC_INET_GAME );
-	// SET_EVENT_VOID( internetGames, onActivated, UI_InternetGames_Menu );
+	SET_EVENT_VOID( internetGames, onActivated, UI_InternetGames_Menu );
 
 	spectateGames.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY|QMF_GRAYED;
 	spectateGames.SetNameAndStatus( "Spectate game", "Spectate internet games" );
@@ -113,7 +113,7 @@ void CMenuMultiplayer::_Init( void )
 	LANGame.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	LANGame.SetNameAndStatus( "LAN game", "Set up the game on the local area network" );
 	LANGame.SetPicture( PC_LAN_GAME );
-	// SET_EVENT_VOID( LANGame, onActivated, UI_LANGames_Menu );
+	SET_EVENT_VOID( LANGame, onActivated, UI_LanGame_Menu );
 
 	Customize.Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	Customize.SetNameAndStatus( "Customize", "Choose your player name, and select visual options for your character" );
