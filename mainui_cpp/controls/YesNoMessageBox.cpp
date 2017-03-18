@@ -75,6 +75,8 @@ void CMenuYesNoMessageBox::VidInit( void )
 	no.SetRect( DLG_X + 530, 460, UI_BUTTONS_WIDTH / 2, UI_BUTTONS_HEIGHT );
 	SetRect( DLG_X + 192, 256, 640, 256 );
 
+	dlgMessage1.SetCharSize( UI_MED_CHAR_WIDTH, UI_MED_CHAR_HEIGHT );
+
 	CMenuAction::VidInit(); // setup rect properly
 }
 
@@ -86,6 +88,21 @@ CMenuYesNoMessageBox::Draw
 void CMenuYesNoMessageBox::Draw( void )
 {
 	UI_FillRect( m_iX, m_iY, m_iWidth, m_iHeight, uiPromptBgColor );
+}
+
+/*
+==============
+CMenuYesNoMessageBox::Key
+==============
+*/
+const char *CMenuYesNoMessageBox::Key(int key, int down)
+{
+	if( key == K_ESCAPE && down )
+	{
+		onNegative( this, negativeExtra );
+		return uiSoundNull;
+	}
+	else return CMenuAction::Key( key, down );
 }
 
 /*
@@ -119,6 +136,17 @@ void CMenuYesNoMessageBox::SetNegativeButton(const char *msg, int buttonPic, voi
 {
 	no.SetName( msg );
 	no.SetPicture( buttonPic );
+}
+
+/*
+==============
+CMenuYesNoMessageBox::HighlightChoice
+==============
+*/
+void CMenuYesNoMessageBox::HighlightChoice( bool yesno )
+{
+	yes.EnablePulse( yesno );
+	no.EnablePulse( !yesno );
 }
 
 /*

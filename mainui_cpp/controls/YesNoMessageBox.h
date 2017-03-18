@@ -26,9 +26,11 @@ public:
 	virtual void Init();
 	virtual void VidInit();
 	virtual void Draw();
+	virtual const char *Key( int key, int down );
 	void SetMessage( const char *msg );
 	void SetPositiveButton( const char *msg, int buttonPic, void *extra = NULL );
 	void SetNegativeButton( const char *msg, int buttonPic, void *extra = NULL );
+	void HighlightChoice( bool yesno ); // yes == true, no == false
 	void ToggleVisibility();
 
 	EventCallback onPositive;

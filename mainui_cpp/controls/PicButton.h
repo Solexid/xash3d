@@ -29,6 +29,7 @@ public:
 	CMenuPicButton() : CMenuBaseItem()
 	{
 		EnableTransitions( true );
+		EnablePulse( false );
 		Flags() = QMF_HIGHLIGHTIFFOCUS|QMF_DROPSHADOW|QMF_NOTIFY;
 	}
 
@@ -39,7 +40,8 @@ public:
 	void SetPicture( int ID );
 	void SetPicture( const char *filename );
 
-	void EnableTransitions( bool enable ) { enableTrans = enable; }
+	void EnableTransitions( bool enable ) { m_bEnableTrans = enable; }
+	void EnablePulse( bool enable ) { m_bPulse = enable; }
 
 	static void InitTitleAnim( void );
 	static void DrawTitleAnim( void );
@@ -57,7 +59,8 @@ private:
 
 	HIMAGE pic;
 	int button_id;
-	bool enableTrans;
+	bool m_bEnableTrans;
+	bool m_bPulse;
 
 	static Quad LerpQuad( Quad a, Quad b, float frac );
 

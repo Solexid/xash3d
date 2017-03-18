@@ -137,19 +137,18 @@ void CMenuPicButton::Draw( )
 
 	if( m_szStatusText && m_iFlags & QMF_NOTIFY )
 	{
-		int	x, y, w;
+		int	x, w;
 
 		x = 290;
 		w = UI_SMALL_CHAR_WIDTH * strlen( m_szStatusText );
 		UI_ScaleCoords( &x, NULL, &w, NULL );
 		x += m_iX;
-		y = m_iY + m_iHeight / 3;
 
 		int	r, g, b;
 
 		UnpackRGB( r, g, b, uiColorHelp );
 		EngFuncs::DrawSetTextColor( r, g, b );
-		EngFuncs::DrawConsoleString( x, y, m_szStatusText );
+		EngFuncs::DrawConsoleString( x, m_iY, m_szStatusText );
 	}
 
 	if( this->pic )
@@ -167,7 +166,19 @@ void CMenuPicButton::Draw( )
 
 		EngFuncs::PIC_Set( this->pic, r, g, b, 255 );
 		EngFuncs::PIC_EnableScissor( m_iX, m_iY, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height - 2 );
-		EngFuncs::PIC_DrawAdditive( m_iX, m_iY, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height, &rects[state] );
+
+		if( ( state == BUTTON_NOFOCUS && m_bPulse ) || (state == BUTTON_FOCUS && (m_iFlags & QMF_PULSEIFFOCUS )))
+		{
+			EngFuncs::PIC_DrawAdditive( m_iX, m_iY, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height, &rects[BUTTON_NOFOCUS] );
+
+			EngFuncs::PIC_Set( this->pic, r, g, b, 255 *(0.5 + 0.5 * sin( (float)uiStatic.realTime / ( UI_PULSE_DIVISOR * 2 ))));
+			EngFuncs::PIC_DrawAdditive( m_iX, m_iY, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height, &rects[BUTTON_FOCUS] );
+		}
+		else
+		{
+			// just draw
+			EngFuncs::PIC_DrawAdditive( m_iX, m_iY, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height, &rects[state] );
+		}
 
 		a = (512 - (uiStatic.realTime - this->m_iLastFocusTime)) >> 1;
 
@@ -176,6 +187,7 @@ void CMenuPicButton::Draw( )
 			EngFuncs::PIC_Set( this->pic, r, g, b, a );
 			EngFuncs::PIC_DrawAdditive( m_iX, m_iY, uiStatic.buttons_draw_width, uiStatic.buttons_draw_height, &rects[BUTTON_FOCUS] );
 		}
+
 		EngFuncs::PIC_DisableScissor();
 	}
 	else
@@ -377,7 +389,7 @@ void CMenuPicButton::SetTitleAnim( int anim_state )
 	//if( button->id == ID_YES || button->id == ID_NO )
 	//	return;
 
-	if( !button->enableTrans )
+	if( !button->m_bEnableTrans )
 		return;
 
 	if( anim_state == AS_TO_TITLE )
