@@ -242,7 +242,7 @@ public:
 
 	virtual void Init( void ){}
 	virtual void VidInit( void ){}
-	virtual const char *Key( int key, int down ){}
+	virtual const char *Key( int key, int down ){ return 0; }
 	virtual void Draw( void ){}
 	virtual void Char( int key ){}
 	virtual ~CMenuBaseItem(){}
