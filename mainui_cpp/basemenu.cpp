@@ -31,8 +31,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "menufont.h"	// built-in menu font
 #include "utils.h"
 #include "menu_btnsbmp_table.h"
-//CR
-#include "ui_title_anim.h"
 
 cvar_t		*ui_precache;
 cvar_t		*ui_showmodels;
@@ -1134,7 +1132,7 @@ void UI_MouseMove( int x, int y )
 	uiStatic.cursorY = y;
 
 	// hack: prevent changing focus when field active
-#if defined(__ANDROID__) || defined(MENU_FIELD_RESIZE_HACK)
+#if (defined(__ANDROID__) || defined(MENU_FIELD_RESIZE_HACK)) && 0
 	CMenuField *f = uiStatic.menuActive->ItemAtCursor();
 	if( f && f->type == QMTYPE_FIELD )
 	{
@@ -1184,6 +1182,7 @@ void CMenuFramework::MouseMove( int x, int y )
 		if( !UI_CursorInRect( item->XPos(), item->YPos(), item->Width(), item->Height() ))
 		{
 			item->m_bPressed = false;
+			item->Flags() &= ~QMF_HASMOUSEFOCUS;
 			continue;
 		}
 
@@ -1669,13 +1668,13 @@ void UI_Init( void )
 	EngFuncs::CvarRegister( "menu_mp_firsttime", "1", FCVAR_ARCHIVE );
 
 	EngFuncs::Cmd_AddCommand( "menu_main", UI_Main_Menu );
-	/*
 	EngFuncs::Cmd_AddCommand( "menu_newgame", UI_NewGame_Menu );
+	EngFuncs::Cmd_AddCommand( "menu_options", UI_Options_Menu );
+	/*
 	EngFuncs::Cmd_AddCommand( "menu_loadgame", UI_LoadGame_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_savegame", UI_SaveGame_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_saveload", UI_SaveLoad_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_multiplayer", UI_MultiPlayer_Menu );
-	EngFuncs::Cmd_AddCommand( "menu_options", UI_Options_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_langame", UI_LanGame_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_internetgames", UI_InternetGames_Menu );
 	EngFuncs::Cmd_AddCommand( "menu_playersetup", UI_PlayerSetup_Menu );

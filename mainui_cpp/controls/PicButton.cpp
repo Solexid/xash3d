@@ -125,7 +125,10 @@ void CMenuPicButton::Draw( )
 	int state = BUTTON_NOFOCUS;
 
 	if( m_iFlags & (QMF_HASMOUSEFOCUS|QMF_HASKEYBOARDFOCUS))
+	{
+		//EngFuncs::FillRGBA( m_iX, m_iY, m_iWidth, m_iHeight, 255, 255, 255, 255 );
 		state = BUTTON_FOCUS;
+	}
 
 	// make sure what cursor in rect
 	if( m_bPressed && cursorDown )
@@ -134,24 +137,19 @@ void CMenuPicButton::Draw( )
 
 	if( m_szStatusText && m_iFlags & QMF_NOTIFY )
 	{
-		int	charW, charH;
-		int	x, w;
-
-		charW = UI_SMALL_CHAR_WIDTH;
-		charH = UI_SMALL_CHAR_HEIGHT;
-
-		UI_ScaleCoords( NULL, NULL, &charW, &charH );
+		int	x, y, w;
 
 		x = 290;
 		w = UI_SMALL_CHAR_WIDTH * strlen( m_szStatusText );
 		UI_ScaleCoords( &x, NULL, &w, NULL );
 		x += m_iX;
+		y = m_iY + m_iHeight / 3;
 
 		int	r, g, b;
 
 		UnpackRGB( r, g, b, uiColorHelp );
 		EngFuncs::DrawSetTextColor( r, g, b );
-		EngFuncs::DrawConsoleString( x, m_iY, m_szStatusText );
+		EngFuncs::DrawConsoleString( x, y, m_szStatusText );
 	}
 
 	if( this->pic )
@@ -244,6 +242,18 @@ void CMenuPicButton::SetPicture( int ID )
 		m_iFlags |= QMF_ACT_ONRELEASE;
 }
 
+void CMenuPicButton::SetPicture(const char *filename)
+{
+	m_iWidth = UI_BUTTONS_WIDTH;
+	m_iHeight = UI_BUTTONS_HEIGHT;
+
+	pic = EngFuncs::PIC_Load( filename );
+
+	if( pic ) // text buttons not use it
+		m_iFlags |= QMF_ACT_ONRELEASE;
+
+}
+
 // ============================ Animations ===========================
 #define BANNER_X_FIX	-16
 #define BANNER_Y_FIX	-20
@@ -259,6 +269,7 @@ int		CMenuPicButton::transition_state = CMenuPicButton::AS_TO_TITLE;
 HIMAGE	CMenuPicButton::TransPic = 0;
 bool	CMenuPicButton::hold_button_stack = false;
 int		CMenuPicButton::transition_initial_time;
+int		CMenuPicButton::PreClickDepth;
 
 
 void CMenuPicButton::TACheckMenuDepth( void )
@@ -309,18 +320,16 @@ CMenuPicButton::Quad CMenuPicButton::LerpQuad( Quad a, Quad b, float frac )
 }
 
 // TODO: Find CMenuBannerBitmap in next menu page and correct
-void CMenuPicButton::SetupTitleQuad()
+void CMenuPicButton::SetupTitleQuad( int x, int y, int w, int h )
 {
-	TitleLerpQuads[1].x  = UI_BANNER_POSX * ScreenHeight / 768;
-	TitleLerpQuads[1].y  = UI_BANNER_POSY * ScreenHeight / 768;
-	TitleLerpQuads[1].lx = UI_BANNER_WIDTH * ScreenHeight / 768;
-	TitleLerpQuads[1].ly = UI_BANNER_HEIGHT * ScreenHeight / 768;
+	TitleLerpQuads[1].x  = x * ScreenHeight / 768;
+	TitleLerpQuads[1].y  = y * ScreenHeight / 768;
+	TitleLerpQuads[1].lx = w * ScreenHeight / 768;
+	TitleLerpQuads[1].ly = h * ScreenHeight / 768;
 }
 
 void CMenuPicButton::DrawTitleAnim()
 {
-	SetupTitleQuad();
-
 	if( !TransPic ) return;
 
 	wrect_t r = { 0, uiStatic.buttons_width, 26, 51 };
@@ -376,20 +385,20 @@ void CMenuPicButton::SetTitleAnim( int anim_state )
 
 	transition_state = anim_state;
 
-	TitleLerpQuads[0].x = XPos();
-	TitleLerpQuads[0].y = YPos();
-	TitleLerpQuads[0].lx = Width();
-	TitleLerpQuads[0].ly = Height();
+	TitleLerpQuads[0].x = button->XPos();
+	TitleLerpQuads[0].y = button->YPos();
+	TitleLerpQuads[0].lx = button->Width();
+	TitleLerpQuads[0].ly = button->Height();
 
 	transition_initial_time = uiStatic.realTime;
-	TransPic = pic;
+	TransPic = button->pic;
 }
 
 void CMenuPicButton::InitTitleAnim()
 {
 	memset( TitleLerpQuads, 0, sizeof( CMenuPicButton::Quad ) * 2 );
 
-	SetupTitleQuad();
+	SetupTitleQuad( UI_BANNER_POSX, UI_BANNER_POSY, UI_BANNER_WIDTH, UI_BANNER_HEIGHT );
 
 	ButtonStackDepth = 0;
 	memset( ButtonStack, 0, sizeof( ButtonStack ));

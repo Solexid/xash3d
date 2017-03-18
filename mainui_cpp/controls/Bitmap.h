@@ -58,6 +58,7 @@ public:
 	void OverrideRect( bool enable ) { m_bOverrideRect = enable; }
 private:
 	bool m_bOverrideRect;
+	bool m_bTransitionSet;
 };
 
 class CMenuBackgroundBitmap: public CMenuBitmap

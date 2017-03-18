@@ -181,10 +181,13 @@ void CMenuBannerBitmap::Draw()
 {
 	// don't draw banners until transition is done
 #ifdef TA_ALT_MODE
-	if( CMenuPicButton::GetTitleTransFraction() != 10 ) return;
+	if( CMenuPicButton::GetTitleTransFraction() != 10 )
 #else
-	if( CMenuPicButton::GetTitleTransFraction() < 1.0f ) return;
+	if( CMenuPicButton::GetTitleTransFraction() < 1.0f )
 #endif
+	{
+		return;
+	}
 
 	CMenuBitmap::Draw();
 }
@@ -193,6 +196,8 @@ void CMenuBannerBitmap::VidInit()
 {
 	if( !m_bOverrideRect )
 		SetRect( UI_BANNER_POSX, UI_BANNER_POSY, UI_BANNER_WIDTH, UI_BANNER_HEIGHT );
+
+	CMenuPicButton::SetupTitleQuad( m_iX, m_iY, m_iWidth, m_iHeight );
 
 	CMenuBitmap::VidInit();
 }

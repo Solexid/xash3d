@@ -27,8 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "utils.h"
 #include "keydefs.h"
 #include "menu_btnsbmp_table.h"
-//CR
-#include "ui_title_anim.h"
 
 #ifdef _DEBUG
 void DBG_AssertFunction( BOOL fExpr, const char* szExpr, const char* szFile, int szLine, const char* szMessage )

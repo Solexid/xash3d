@@ -42,10 +42,10 @@ set (MAINUI_SOURCES
 	basemenu.cpp
 	menu_main.cpp
 	menu_newgame.cpp
+	menu_configuration.cpp
 	menu_btns.cpp
 	menu_strings.cpp
 	udll_int.cpp
-	ui_title_anim.cpp
 	utils.cpp
 	)
 

@@ -20,6 +20,9 @@ GNU General Public License for more details.
 
 #include "menu_btnsbmp_table.h"
 
+// Use hover bitmap from btns_main.bmp instead of head_%s.bmp
+// #define TA_ALT_MODE 1
+
 class CMenuPicButton : public CMenuBaseItem
 {
 public:
@@ -36,13 +39,14 @@ public:
 	void SetPicture( int ID );
 	void SetPicture( const char *filename );
 
-	void EnableTransitions( bool enable ) { enableTrans = false; }
+	void EnableTransitions( bool enable ) { enableTrans = enable; }
 
 	static void InitTitleAnim( void );
 	static void DrawTitleAnim( void );
 	static void PopPButtonStack( void );
 	static void ClearButtonStack( void );
 	static float GetTitleTransFraction( void );
+	static void SetupTitleQuad( int x, int y, int w, int h );
 private:
 	enum animState_e { AS_TO_TITLE, AS_TO_BUTTON };
 	struct Quad { float x, y, lx, ly; };
@@ -53,12 +57,11 @@ private:
 
 	HIMAGE pic;
 	int button_id;
-	int PreClickDepth;
 	bool enableTrans;
 
 	static Quad LerpQuad( Quad a, Quad b, float frac );
-	static void SetupTitleQuad();
 
+	static int PreClickDepth;
 	static int transition_initial_time;
 	static Quad TitleLerpQuads[2];
 	static int transition_state;
