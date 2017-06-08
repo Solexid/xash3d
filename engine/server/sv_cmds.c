@@ -16,6 +16,8 @@ GNU General Public License for more details.
 #include "common.h"
 #include "server.h"
 
+qboolean startingdefmap;
+
 /*
 =================
 SV_ClientPrintf
@@ -201,6 +203,21 @@ void SV_Map_f( void )
 		spawn_entity = GI->sp_entity;
 	else spawn_entity = GI->mp_entity;
 
+	if( Host_IsDedicated() && !startingdefmap )
+	{
+		// apply servercfgfile cvar on first dedicated server run
+		if( !host.stuffcmdsrun )
+			Cbuf_Execute();
+
+		// dedicated servers are using settings from server.cfg file
+		Cbuf_AddText( va( "exec %s\n", Cvar_VariableString( "servercfgfile" )));
+	}
+	else
+		startingdefmap = false;
+
+	// make sure that all configs are executed
+	Cbuf_Execute();
+
 	flags = SV_MapIsValid( mapname, spawn_entity, NULL );
 
 	if( flags & MAP_INVALID_VERSION )
@@ -252,6 +269,51 @@ void SV_Map_f( void )
 	}
 	SV_LevelInit( mapname, NULL, NULL, false );
 	SV_ActivateServer ();
+}
+
+/*
+==================
+
+SV_Maps_f
+
+Lists maps according to given substring.
+
+TODO: Make it more convenient. (Timestamp check, temporary file, ...)
+
+==================
+*/
+void SV_Maps_f(void)
+{
+	char mapName[256], *seperator = "-------------------";
+	char *argStr = Cmd_Argv(1); //Substr
+	int listIndex;
+	search_t *mapList;
+
+	if (Cmd_Argc() != 2)
+	{
+		Msg("Usage:  maps <substring>\nmaps * for full listing\n");
+		return;
+	}
+
+        mapList = FS_Search(va("maps/*%s*.bsp", argStr), true, true);
+	if (!mapList)
+	{
+		Msg("No related map found in \"%s/maps\"\n", GI->gamedir);
+		return;
+	}
+	Msg("%s\n", seperator);
+	for (listIndex = 0; listIndex != mapList->numfilenames; ++listIndex)
+	{
+		const char *ext;
+		Q_strncpy(mapName, mapList->filenames[listIndex], sizeof(mapName) - 1);
+		ext = FS_FileExtension(mapName);
+		if (Q_strcmp(ext, "bsp")) continue;
+		if ( (Q_strcmp(argStr, "*") == 0) || (Q_stristr(mapName, argStr) != NULL) )
+		{
+			Msg("%s\n", &mapName[5]); //Do not show "maps/"
+		}
+	}
+	Msg("%s\nDirectory: \"%s/maps\" - Maps listed: %d\n", seperator, GI->basedir, mapList->numfilenames);
 }
 
 /*
@@ -328,6 +390,38 @@ void SV_NewGame_f( void )
 	}
 
 	Host_NewGame( GI->startmap, false );
+}
+
+/*
+==============
+SV_StartDefaultMap_f
+
+==============
+*/
+void SV_StartDefaultMap_f( void )
+{
+	char *defaultmap;
+
+	if( Cmd_Argc() != 1 )
+	{
+		Msg( "Usage: startdefaultmap\n" );
+		return;
+	}
+
+	// apply servercfgfile cvar on first dedicated server run
+	if( !host.stuffcmdsrun )
+		Cbuf_Execute();
+
+	// get defaultmap cvar
+	Cbuf_AddText( va( "exec %s\n", Cvar_VariableString( "servercfgfile" )));
+	Cbuf_Execute();
+
+	defaultmap = Cvar_VariableString( "defaultmap" );
+	if( !defaultmap[0] )
+		Msg( "Please add \"defaultmap\" cvar with default map name to your server.cfg!\n" );
+	else
+		Cbuf_AddText( va( "map %s\n", defaultmap ));
+	startingdefmap = true;
 }
 
 /*
@@ -722,29 +816,66 @@ Kick a user off of the server
 */
 void SV_Kick_f( void )
 {
-	if( Cmd_Argc() != 2 )
+	sv_client_t *cl;
+	const char *param, *clientId;
+	char name[32];
+	int userid;
+
+	if( !SV_Active() )
 	{
-		Msg( "Usage: kick <userid> | <name>\n" );
+		Msg( "Can't kick when not running local server.");
 		return;
 	}
 
-	if( !SV_SetPlayer( )) return;
+	if( Cmd_Argc() < 2 )
+	{
+		Msg( "Usage: kick <#id|name> [reason]\n" );
+		return;
+	}
 
-	if( NET_IsLocalAddress( svs.currentPlayer->netchan.remote_address ))
+	param = Cmd_Argv( 1 );
+
+	if( *param == '#' && Q_isdigit( param + 1 ) )
+		cl = SV_ClientById( Q_atoi( param + 1 ) );
+	else cl = SV_ClientByName( param );
+
+	if( !cl )
+	{
+		Msg( "Client is not on the server\n" );
+		return;
+	}
+
+	if( NET_IsLocalAddress( cl->netchan.remote_address ))
 	{
 		Msg( "The local player cannot be kicked!\n" );
 		return;
 	}
 
-	SV_BroadcastPrintf( PRINT_HIGH, "%s was kicked\n", svs.currentPlayer->name );
-	SV_ClientPrintf( svs.currentPlayer, PRINT_HIGH, "You were kicked from the game\n" );
-	SV_DropClient( svs.currentPlayer );
+	param = Cmd_Argv( 2 );
+	if( *param )
+		SV_ClientPrintf( cl, PRINT_HIGH, "You were kicked from the game with message: \"%s\"\n", param );
+	else
+		SV_ClientPrintf( cl, PRINT_HIGH, "You were kicked from the game\n" );
 
-	Log_Printf( "Kick: \"%s<%i><%s><>\" was kicked by \"Console\"\n", svs.currentPlayer->name,
-				svs.currentPlayer->userid, SV_GetClientIDString ( svs.currentPlayer ) );
+	Q_strcpy( name, cl->name );
+	userid = cl->userid;
+	clientId = SV_GetClientIDString( cl );
+
+	SV_DropClient( cl );
+
+	if ( *param )
+	{
+		SV_BroadcastPrintf( PRINT_HIGH, "%s was kicked with message: \"%s\"\n", name, param );
+		Log_Printf( "Kick: \"%s<%i><%s><>\" was kicked by \"Console\" (message \"%s\")\n", name, userid, clientId, param );
+	}
+	else
+	{
+		SV_BroadcastPrintf( PRINT_HIGH, "%s was kicked\n", name );
+		Log_Printf( "Kick: \"%s<%i><%s><>\" was kicked by \"Console\"\n", name, userid, clientId );
+	}
 
 	// min case there is a funny zombie
-	svs.currentPlayer->lastmessage = host.realtime;
+	cl->lastmessage = host.realtime;
 }
 
 /*
@@ -806,9 +937,10 @@ void SV_Status_f( void )
 		if( cl->state == cs_connected ) Msg( "Connect" );
 		else if( cl->state == cs_zombie ) Msg( "Zombie " );
 		else if( cl->fakeclient ) Msg( "Bot   " );
+		else if( cl->netchan.remote_address.type == NA_LOOPBACK ) Msg( "Local ");
 		else
 		{
-			ping = cl->ping < 9999 ? cl->ping : 9999;
+			ping = min( cl->ping, 9999 );
 			Msg( "%7i ", ping );
 		}
 
@@ -886,6 +1018,38 @@ void SV_ServerInfo_f( void )
 {
 	Msg( "Server info settings:\n" );
 	Info_Print( Cvar_Serverinfo( ));
+}
+
+void SV_LocalInfo_f( void )
+{
+	char *value;
+
+	if ( Cmd_Argc( ) > 3 )
+	{
+		Msg( "Usage: localinfo [ <key> [value] ]\n" );
+		return;
+	}
+
+	if ( Cmd_Argc( ) == 1 )
+	{
+		Msg( "Local info settings:\n" );
+		Info_Print( localinfo );
+		return;
+	}
+	else if ( Cmd_Argc( ) == 2 )
+	{
+		value = Info_ValueForKey( localinfo, Cmd_Argv( 1 ) );
+		Msg( "%s: %s\n", Cmd_Argv( 1 ), *value ? value : "Key not exists" );
+		return;
+	}
+
+	if ( Cmd_Argv( 1 )[0] == '*' )
+	{
+		Msg( "Star variables cannot be changed.\n" );
+		return;
+	}
+
+	Info_SetValueForKey( localinfo, Cmd_Argv( 1 ), Cmd_Argv( 2 ), MAX_LOCALINFO );
 }
 
 /*
@@ -1008,6 +1172,30 @@ void SV_EntityInfo_f( void )
 }
 
 /*
+================
+Rcon_Redirect_f
+
+Force redirect N lines of console output to client
+================
+*/
+void Rcon_Redirect_f( void )
+{
+	int lines = 2000;
+
+	if( !host.rd.target )
+	{
+		Msg( "redirect is only valid from rcon\n" );
+		return;
+	}
+
+	if( Cmd_Argc() == 2 )
+		lines = Q_atoi( Cmd_Argv( 1 ) );
+
+	host.rd.lines = lines;
+	Msg( "Redirection enabled for next %d lines\n", lines );
+}
+
+/*
 ==================
 SV_InitOperatorCommands
 ==================
@@ -1018,10 +1206,12 @@ void SV_InitOperatorCommands( void )
 	Cmd_AddCommand( "kick", SV_Kick_f, "kick a player off the server by number or name" );
 	Cmd_AddCommand( "status", SV_Status_f, "print server status information" );
 	Cmd_AddCommand( "serverinfo", SV_ServerInfo_f, "print server settings" );
+	Cmd_AddCommand( "localinfo", SV_LocalInfo_f, "print local info settings" );
 	Cmd_AddCommand( "clientinfo", SV_ClientInfo_f, "print user infostring (player num required)" );
 	Cmd_AddCommand( "playersonly", SV_PlayersOnly_f, "freezes physics, except for players" );
 
 	Cmd_AddCommand( "map", SV_Map_f, "start new level" );
+	Cmd_AddCommand( "maps", SV_Maps_f, "list maps" );
 	Cmd_AddCommand( "newgame", SV_NewGame_f, "begin new game" );
 	Cmd_AddCommand( "endgame", SV_EndGame_f, "end current game, takes ending message" );
 	Cmd_AddCommand( "killgame", SV_KillGame_f, "end current game" );
@@ -1039,10 +1229,12 @@ void SV_InitOperatorCommands( void )
 	Cmd_AddCommand( "loadquick", SV_QuickLoad_f, "load a quick-saved game file" );
 	Cmd_AddCommand( "killsave", SV_DeleteSave_f, "delete a saved game file and saveshot" );
 	Cmd_AddCommand( "autosave", SV_AutoSave_f, "save the game to 'autosave' file" );
+	Cmd_AddCommand( "redirect", Rcon_Redirect_f, "force enable rcon redirection" );
 	if( Host_IsDedicated() )
 	{
 		Cmd_AddCommand( "say", SV_ConSay_f, "send a chat message to everyone on the server" );
 		Cmd_AddCommand( "killserver", SV_KillServer_f, "shutdown current server" );
+		Cmd_AddCommand( "startdefaultmap", SV_StartDefaultMap_f, "start default map in dedicated server" );
 	}
 	else
 	{
@@ -1059,7 +1251,6 @@ void SV_KillOperatorCommands( void )
 {
 	Cmd_RemoveCommand( "heartbeat" );
 	Cmd_RemoveCommand( "kick" );
-	Cmd_RemoveCommand( "kill" );
 	Cmd_RemoveCommand( "status" );
 	Cmd_RemoveCommand( "serverinfo" );
 	Cmd_RemoveCommand( "clientinfo" );
@@ -1082,6 +1273,7 @@ void SV_KillOperatorCommands( void )
 	{
 		Cmd_RemoveCommand( "say" );
 		Cmd_RemoveCommand( "killserver" );
+		Cmd_RemoveCommand( "startdefaultmap" );
 	}
 	else
 	{

@@ -14,6 +14,9 @@ GNU General Public License for more details.
 */
 
 #include "common.h"
+#include "base_cmd.h"
+
+#define HASH_SIZE 256
 
 convar_t	*cvar_vars; // head of list
 convar_t	*userinfo, *physinfo, *serverinfo, *renderinfo;
@@ -23,7 +26,7 @@ convar_t	*userinfo, *physinfo, *serverinfo, *renderinfo;
 Cvar_GetList
 ============
 */
-cvar_t *Cvar_GetList( void )
+cvar_t *GAME_EXPORT Cvar_GetList( void )
 {
 	return (cvar_t *)cvar_vars;
 }
@@ -60,13 +63,18 @@ Cvar_FindVar
 */
 convar_t *Cvar_FindVar( const char *var_name )
 {
-	convar_t	*var;
+#if defined(XASH_HASHED_VARS)
+	return (convar_t *)BaseCmd_Find( HM_CVAR, var_name );
+#else
+	convar_t *var;
 
 	for( var = cvar_vars; var; var = var->next )
 	{
 		if( !Q_stricmp( var_name, var->name ))
 			return var;
 	}
+#endif
+
 	return NULL;
 }
 
@@ -75,7 +83,7 @@ convar_t *Cvar_FindVar( const char *var_name )
 Cvar_VariableValue
 ============
 */
-float Cvar_VariableValue( const char *var_name )
+float GAME_EXPORT Cvar_VariableValue( const char *var_name )
 {
 	convar_t	*var;
 
@@ -104,7 +112,7 @@ int Cvar_VariableInteger( const char *var_name )
 Cvar_VariableString
 ============
 */
-char *Cvar_VariableString( const char *var_name )
+char *GAME_EXPORT Cvar_VariableString( const char *var_name )
 {
 	convar_t	*var;
 
@@ -163,7 +171,8 @@ The flags will be or'ed in if the variable exists.
 */
 convar_t *Cvar_Get( const char *var_name, const char *var_value, int flags, const char *var_desc )
 {
-	convar_t	*current, *next, *cvar;
+	convar_t	*cvar;
+	convar_t *current, *next;
 
 	ASSERT( var_name != NULL );
 
@@ -241,7 +250,7 @@ convar_t *Cvar_Get( const char *var_name, const char *var_value, int flags, cons
 	}
 
 	// allocate a new cvar
-	cvar = Z_Malloc( sizeof( *cvar ));
+	cvar = Z_Malloc( sizeof( convar_t ));
 	cvar->name = copystring( var_name );
 	cvar->string = copystring( var_value );
 	cvar->reset_string = copystring( var_value );
@@ -252,14 +261,19 @@ convar_t *Cvar_Get( const char *var_name, const char *var_value, int flags, cons
 	cvar->flags = flags;
 
 	// link the variable in alphanumerical order
-	for( current = NULL, next = cvar_vars ; next && Q_strcmp( next->name, cvar->name ) < 0 ; current = next, next = next->next )
-		;
-	if( current ) {
+	for( current = NULL, next = cvar_vars ; next && Q_strcmp( next->name, cvar->name ) < 0 ; current = next, next = next->next );
+
+	if( current )
 		current->next = cvar;
-	} else {
+	else
 		cvar_vars = cvar;
-	}
+
 	cvar->next = next;
+
+#if defined(XASH_HASHED_VARS)
+	// add to map
+	BaseCmd_Insert( HM_CVAR, cvar, cvar->name );
+#endif
 
 	return cvar;
 }
@@ -271,7 +285,7 @@ Cvar_RegisterVariable
 Adds a freestanding variable to the variable list.
 ============
 */
-void Cvar_RegisterVariable( cvar_t *var )
+void GAME_EXPORT Cvar_RegisterVariable( cvar_t *var )
 {
 	convar_t	*current, *next, *cvar;
 
@@ -287,7 +301,7 @@ void Cvar_RegisterVariable( cvar_t *var )
 			MsgDev( D_ERROR, "Can't register variable %s, already defined\n", var->name );
 		}
 		else
-		{
+		{	
 			var->string = cvar->string;	// we already have right string
 			var->value = Q_atof( var->string );
 			var->flags |= CVAR_EXTDLL;	// all cvars passed this function are game cvars
@@ -301,11 +315,14 @@ void Cvar_RegisterVariable( cvar_t *var )
 			else
 			{
 				// otherwise find it somewhere in the list
-				for( current = cvar_vars; current->next != cvar; current = current->next )
-				;
+				for( current = cvar_vars; current->next != cvar; current = current->next );
+
 				current->next = (convar_t *)var;
 			}
 
+#if defined(XASH_HASHED_VARS)
+			BaseCmd_Replace( HM_CVAR, var, var->name );
+#endif
 			// release current cvar (but keep string)
 			Z_Free( cvar->name );
 			Z_Free( cvar->latched_string );
@@ -326,14 +343,22 @@ void Cvar_RegisterVariable( cvar_t *var )
 		var->flags |= CVAR_EXTDLL;		// all cvars passed this function are game cvars
 	
 		// link the variable in alphanumerical order
-		for( current = NULL, next = cvar_vars ; next && Q_strcmp( next->name, var->name ) < 0 ; current = next, next = next->next )
-			;
-		if( current ) {
+		for( current = NULL, next = cvar_vars ; next && Q_strcmp( next->name, var->name ) < 0 ; current = next, next = next->next );
+
+		if( current )
 			current->next = (convar_t *)var;
-		} else {
+		else
 			cvar_vars = (convar_t *)var;
-		}
+
 		var->next = (cvar_t *)next;
+
+		// add to bucket
+		// we got a cvar_t from gamedll, where we have no left to chain in bucket
+		// so disable it
+
+#if defined(XASH_HASHED_VARS)
+		BaseCmd_Insert( HM_CVAR, var, var->name );
+#endif
 	}
 }
 	
@@ -521,7 +546,7 @@ convar_t *Cvar_Set2( const char *var_name, const char *value, qboolean force )
 Cvar_Set
 ============
 */
-void Cvar_Set( const char *var_name, const char *value )
+void GAME_EXPORT Cvar_Set( const char *var_name, const char *value )
 {
 	Cvar_Set2( var_name, value, true );
 }
@@ -601,7 +626,7 @@ void Cvar_FullSet( const char *var_name, const char *value, int flags )
 Cvar_DirectSet
 ============
 */
-void Cvar_DirectSet( cvar_t *var, const char *value )
+void GAME_EXPORT Cvar_DirectSet( cvar_t *var, const char *value )
 {
 	cvar_t		*test;
 	const char	*pszValue;
@@ -699,7 +724,7 @@ void Cvar_DirectSet( cvar_t *var, const char *value )
 Cvar_SetFloat
 ============
 */
-void Cvar_SetFloat( const char *var_name, float value )
+void GAME_EXPORT Cvar_SetFloat( const char *var_name, float value )
 {
 	char	val[32];
 
@@ -1125,6 +1150,10 @@ void Cvar_Restart_f( void )
 		// throw out any variables the user created
 		if( var->flags & CVAR_USER_CREATED )
 		{
+#if defined(XASH_HASHED_VARS)
+			BaseCmd_Remove( HM_CVAR, var, var->name );
+#endif
+
 			*prev = var->next;
 			Z_Free( var->name );
 			Z_Free( var->string );
@@ -1240,6 +1269,7 @@ void Cvar_Unlink_f( void )
 
 	for( prev = &cvar_vars; ( var = *prev ); )
 	{
+
 		// ignore all non-game cvars
 		if( !( var->flags & CVAR_EXTDLL ))
 		{
@@ -1248,6 +1278,9 @@ void Cvar_Unlink_f( void )
 		}
 
 		// throw out any variables the game created
+#if defined(XASH_HASHED_VARS)
+		BaseCmd_Remove( HM_CVAR, var, var->name );
+#endif
 		*prev = var->next;
 		Z_Free( var->string );
 	}
@@ -1281,6 +1314,10 @@ void Cvar_Unlink( void )
 		}
 
 		// throw out any variables the game created
+#if defined(XASH_HASHED_VARS)
+		BaseCmd_Remove( HM_CVAR, var, var->name );
+#endif
+
 		*prev = var->next;
 		Z_Free( var->name );
 		Z_Free( var->string );
@@ -1301,7 +1338,6 @@ Reads in all archived cvars
 void Cvar_Init( void )
 {
 	cvar_vars = NULL;
-
 	userinfo = Cvar_Get( "@userinfo", "0", CVAR_READ_ONLY, "" ); // use ->modified value only
 	physinfo = Cvar_Get( "@physinfo", "0", CVAR_READ_ONLY, "" ); // use ->modified value only
 	serverinfo = Cvar_Get( "@serverinfo", "0", CVAR_READ_ONLY, "" ); // use ->modified value only

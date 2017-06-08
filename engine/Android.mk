@@ -31,7 +31,7 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/client/vgui		    \
 	$(LOCAL_PATH)/server			    \
 	$(LOCAL_PATH)/common/imagelib		    \
-	$(LOCAL_PATH)/common/sdl		    \
+	$(LOCAL_PATH)/platform/android		    \
 	$(LOCAL_PATH)/common/soundlib		    \
 	$(LOCAL_PATH)/common/soundlib/libmpg        \
 	$(LOCAL_PATH)/../common		            \
@@ -75,9 +75,16 @@ LOCAL_SRC_FILES := \
            client/gl_rsurf.c \
            client/gl_sprite.c \
            client/gl_studio.c \
-           client/gl_vidnt_common.c \
+           client/vid_common.c \
            client/gl_warp.c \
-           client/s_backend_opensles.c \
+           client/joyinput.c \
+           platform/android/snd_opensles.c \
+           client/input.c \
+           client/keys.c \
+           client/input_evdevkey.c \
+           client/console.c \
+           client/touch.c \
+           client/gamma.c \
            client/s_dsp.c \
            client/s_load.c \
            client/s_main.c \
@@ -88,24 +95,19 @@ LOCAL_SRC_FILES := \
            client/s_vox.c \
            common/avikit.c \
            common/build.c \
-		   common/cfgscript.c \
+           common/base_cmd.c \
+           common/cfgscript.c \
            common/cmd.c \
            common/common.c \
-           common/touch.c \
            common/con_utils.c \
-           common/console.c \
            common/crclib.c \
            common/crtlib.c \
            common/cvar.c \
            common/filesystem.c \
-           common/gamma.c \
            common/host.c \
            common/hpak.c \
            common/infostring.c \
-           common/input.c \
-           common/input_evdevkey.c \
-           common/joyinput.c \
-           common/keys.c \
+           common/identification.c \
            common/library.c \
            common/mathlib.c \
            common/matrixlib.c \
@@ -120,10 +122,11 @@ LOCAL_SRC_FILES := \
            common/pm_trace.c \
            common/random.c \
            common/sys_con.c \
-           common/sys_win.c \
+           common/system.c \
            common/titles.c \
            common/world.c \
            common/zone.c \
+           common/crashhandler.c \
            server/sv_client.c \
            server/sv_cmds.c \
            server/sv_custom.c \
@@ -149,23 +152,23 @@ LOCAL_SRC_FILES := \
            common/soundlib/snd_mp3.c \
            common/soundlib/snd_utils.c \
            common/soundlib/snd_wav.c \
-	   common/sdl/events.c \
 	   common/soundlib/libmpg/dct64_i386.c \
 	   common/soundlib/libmpg/decode_i386.c \
 	   common/soundlib/libmpg/interface.c \
 	   common/soundlib/libmpg/layer2.c \
 	   common/soundlib/libmpg/layer3.c \
 	   common/soundlib/libmpg/tabinit.c \
-	   common/soundlib/libmpg/common.c
+	   common/soundlib/libmpg/common.c \
+	   common/Sequence.c
 
 
 ifeq ($(XASH_SDL),1)
-LOCAL_SRC_FILES += client/gl_vidnt_nanogl.c \
+LOCAL_SRC_FILES += platform/sdl/vid_sdl_nanogl.c \
 				platform/android/android.c
 LOCAL_SHARED_LIBRARIES += SDL2
 LOCAL_CFLAGS += -DXASH_SDL
 else
-LOCAL_SRC_FILES += client/gl_vidnt_android_nosdl.c \
+LOCAL_SRC_FILES += platform/android/vid_android.c \
 		   platform/android/android_nosdl.c
 endif
 LOCAL_STATIC_LIBRARIES := NanoGL

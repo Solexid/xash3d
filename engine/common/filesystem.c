@@ -13,7 +13,12 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "port.h"
+
+#include "common.h"
+#include "wadfile.h"
+#include "filesystem.h"
+#include "library.h"
+#include "mathlib.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -21,6 +26,7 @@ GNU General Public License for more details.
 #include <stdarg.h> // va
 #ifdef XASH_SDL
 #include <SDL_system.h> // Android External storage
+#include <SDL_filesystem.h> // Android External storage
 #endif
 #ifdef _WIN32
 #include <io.h>
@@ -30,12 +36,6 @@ GNU General Public License for more details.
 #include <errno.h>
 #include <unistd.h>
 #endif
-
-#include "common.h"
-#include "wadfile.h"
-#include "filesystem.h"
-#include "library.h"
-#include "mathlib.h"
 
 #define FILE_BUFF_SIZE		2048
 #define PAK_LOAD_OK			0
@@ -248,19 +248,20 @@ int sel(const struct dirent *d)
 static void listdirectory( stringlist_t *list, const char *path, qboolean lowercase )
 {
 	int		i;
-	signed char		pattern[4096], *c;
+	signed char *c;
 #ifdef _WIN32
+	char pattern[4096];
 	struct _finddata_t	n_file;
-#else
-	struct dirent **n_file = NULL;
-#endif
 	int		hFile;
+#else
+	DIR *dir;
+	struct dirent *entry;
+#endif
 
-	Q_strncpy( (char *)pattern, path, sizeof( pattern ));
-	Q_strncat( (char *)pattern, "*", sizeof( pattern ));
+#ifdef _WIN32
+	Q_snprintf( pattern, sizeof( pattern ), "%s*", path );
 
 	// ask for the directory listing handle
-#ifdef _WIN32
 	hFile = _findfirst( pattern, &n_file );
 	if( hFile == -1 ) return;
 
@@ -271,23 +272,13 @@ static void listdirectory( stringlist_t *list, const char *path, qboolean lowerc
 		stringlistappend( list, n_file.name );
 	_findclose( hFile );
 #else
-	// ask for the directory listing handle
-	hFile = scandir( path, &n_file, NULL, NULL );
-	if( hFile < 1 )
-	{
-#if 0
-		MsgDev( D_INFO, "listdirectory: scandir() failed, %s at %s", strerror(hFile), path );
-#endif
+	if( !( dir = opendir( path ) ) )
 		return;
-	}
 
 	// iterate through the directory
-	for( i = 0; i < hFile; i++)
-	{
-		stringlistappend( list, n_file[i]->d_name );
-		free( n_file[i] );
-	}
-	free( n_file );
+	while( ( entry = readdir( dir ) ))
+		stringlistappend( list, entry->d_name );
+	closedir( dir );
 #endif
 
 	// convert names to lowercase because windows doesn't care, but pattern matching code often does
@@ -313,7 +304,7 @@ emulate WIN32 FS behaviour when opening local file
 */
 const char *FS_FixFileCase( const char *path )
 {
-#ifndef _WIN32
+#if !defined _WIN32 && !TARGET_OS_IPHONE // assume case insensitive
 	DIR *dir; struct dirent *entry;
 	char path2[PATH_MAX], *fname;
 
@@ -507,11 +498,10 @@ void FS_MD5_f( void )
 		int i;
 
 		for( i = 0; i < 16; i++ )
-			phex += Q_sprintf( phex, "%hhx", hash[i] );
+			phex += Q_sprintf( phex, "%02hhx", hash[i] );
 		Msg( "%s\n", hex );
 	}
 }
-
 
 /*
 ============
@@ -547,6 +537,46 @@ void FS_FileBase( const char *in, char *out )
 	if( start < 0 || ( in[start] != '/' && in[start] != '\\' ))
 		start = 0;
 	else start++;
+
+	// length of new sting
+	len = end - start + 1;
+
+	// Copy partial string
+	Q_strncpy( out, &in[start], len + 1 );
+	out[len] = 0;
+}
+
+/*
+============
+FS_MapFileBase
+
+Extracts the base name of a map file (no extension, split map from path)
+============
+*/
+void FS_MapFileBase( const char *in, char *out )
+{
+	int	len, start, end;
+	const char *pstr;
+
+	len = Q_strlen( in );
+	if( !len ) return;
+
+	// scan backward for '.'
+	end = len - 1;
+
+	while( end && in[end] != '.' && in[end] != '/' && in[end] != '\\' )
+		end--;
+
+	if( in[end] != '.' )
+		end = len-1; // no '.', copy to end
+	else end--; // found ',', copy to left of '.'
+
+
+	// strip "maps/" if exists
+	start = 0;
+	pstr = Q_strstr( in, "maps/");
+	if( pstr )
+		start = pstr + 5 - in;
 
 	// length of new sting
 	len = end - start + 1;
@@ -903,8 +933,11 @@ void FS_AddGameHierarchy( const char *dir, int flags )
 				MsgDev( D_NOTE, "%d %s %s\n", i, SI.games[i]->gamedir, SI.games[i]->basedir );
 				if( !Q_strnicmp( dir, SI.games[i]->gamedir, 64 ) )
 				{
-					if( Q_strnicmp( SI.games[i]->gamedir, SI.games[i]->basedir, 64 ) )
+					if( !SI.games[i]->added && Q_strnicmp( SI.games[i]->gamedir, SI.games[i]->basedir, 64 ) )
+					{
+						SI.games[i]->added = true;
 						FS_AddGameHierarchy( SI.games[i]->basedir, flags );
+					}
 				}
 			}
 
@@ -1080,6 +1113,11 @@ void FS_Rescan( void )
 	if( str = getenv("XASH3D_EXTRAS_PAK2") )
 		FS_AddPack_Fullpath( str, NULL, false, FS_NOWRITE_PATH | FS_CUSTOM_PATH );
 	//FS_AddPack_Fullpath( "/data/data/in.celest.xash3d.hl.test/files/pak.pak", NULL, false, FS_NOWRITE_PATH | FS_CUSTOM_PATH );
+#elif TARGET_OS_IPHONE
+	{
+		FS_AddPack_Fullpath( va( "%sextras.pak", SDL_GetBasePath() ), NULL, false, FS_NOWRITE_PATH | FS_CUSTOM_PATH );
+		FS_AddPack_Fullpath( va( "%sextras_%s.pak", SDL_GetBasePath(), GI->gamedir ), NULL, false, FS_NOWRITE_PATH | FS_CUSTOM_PATH );
+	}
 #endif
 
 	if( Q_stricmp( GI->basedir, GI->gamedir ))
@@ -1305,6 +1343,7 @@ void FS_CreateDefaultGameInfo( const char *filename )
 static qboolean FS_ParseLiblistGam( const char *filename, const char *gamedir, gameinfo_t *GameInfo )
 {
 	char	*afile, *pfile;
+	qboolean found_linux = false, found_osx = false;
 	string	token;
 
 	if( !GameInfo ) return false;	
@@ -1330,8 +1369,6 @@ static qboolean FS_ParseLiblistGam( const char *filename, const char *gamedir, g
 	Q_strncpy( GameInfo->dll_path, "cl_dlls", sizeof( GameInfo->dll_path ));
 	Q_strncpy( GameInfo->client_lib, CLIENTDLL, sizeof( GameInfo->client_lib ));
 	Q_strncpy( GameInfo->game_dll, "dlls/hl.dll", sizeof( GameInfo->game_dll ));
-	Q_strncpy( GameInfo->game_dll_osx, "dlls/hl.dylib", sizeof( GameInfo->game_dll_osx ));
-	Q_strncpy( GameInfo->game_dll_linux, "dlls/hl.so", sizeof( GameInfo->game_dll_linux ));
 	Q_strncpy( GameInfo->iconpath, "game.ico", sizeof( GameInfo->iconpath ));
 
 	VectorSet( GameInfo->client_mins[0],   0,   0,  0  );
@@ -1385,10 +1422,12 @@ static qboolean FS_ParseLiblistGam( const char *filename, const char *gamedir, g
 		else if( !Q_stricmp( token, "gamedll_linux" ))
 		{
 			pfile = COM_ParseFile( pfile, GameInfo->game_dll_linux );
+			found_linux = true;
 		}
 		else if( !Q_stricmp( token, "gamedll_osx" ))
 		{
 			pfile = COM_ParseFile( pfile, GameInfo->game_dll_osx );
+			found_osx = false;
 		}
 		else if( !Q_stricmp( token, "icon" ))
 		{
@@ -1452,6 +1491,21 @@ static qboolean FS_ParseLiblistGam( const char *filename, const char *gamedir, g
 		}
 	}
 
+	if( !found_linux || !found_osx )
+	{
+		// just replace extension from dll to so/dylib
+
+		char gamedll[64];
+		Q_strncpy( gamedll, GameInfo->game_dll, sizeof( gamedll ));
+		FS_StripExtension( gamedll );
+
+		if( !found_linux )
+			snprintf( GameInfo->game_dll_linux, sizeof( GameInfo->game_dll_linux ), "%s.so", gamedll );
+
+		if( !found_osx )
+			snprintf( GameInfo->game_dll_osx, sizeof( GameInfo->game_dll_osx ), "%s.dylib", gamedll );
+	}
+
 	if( !FS_SysFolderExists( va( "%s\\%s", host.rootdir, GameInfo->gamedir )))
 		Q_strncpy( GameInfo->gamedir, gamedir, sizeof( GameInfo->gamedir ));
 
@@ -1491,6 +1545,7 @@ static qboolean FS_ParseGameInfo( const char *gamedir, gameinfo_t *GameInfo )
 	char	*afile, *pfile;
 	string	fs_path, filepath;
 	string	liblist, token;
+	qboolean found_linux = false, found_osx = false;
 
 	Q_snprintf( filepath, sizeof( filepath ), "%s/gameinfo.txt", gamedir );
 	Q_snprintf( liblist, sizeof( liblist ), "%s/liblist.gam", gamedir );
@@ -1521,7 +1576,11 @@ static qboolean FS_ParseGameInfo( const char *gamedir, gameinfo_t *GameInfo )
 	Q_strncpy( GameInfo->title, "New Game", sizeof( GameInfo->title ));
 	Q_strncpy( GameInfo->sp_entity, "info_player_start", sizeof( GameInfo->sp_entity ));
 	Q_strncpy( GameInfo->mp_entity, "info_player_deathmatch", sizeof( GameInfo->mp_entity ));
-#if defined(__ANDROID__)
+#if TARGET_OS_IPHONE
+	//Q_strncpy( GameInfo->game_dll, va( "%sserver", SDL_GetBasePath() ), sizeof( GameInfo->game_dll ) );
+	
+	//Q_strncpy( GameInfo->game_dll, "hlsv.framework/hl", sizeof( GameInfo->game_dll ) );
+#elif defined(__ANDROID__)
 	Q_strncpy( GameInfo->dll_path, getenv("XASH3D_GAMELIBDIR"), sizeof( GameInfo->dll_path ));
 	Q_strncpy( GameInfo->client_lib, CLIENTDLL, sizeof( GameInfo->client_lib ));
 	Q_strncpy( GameInfo->game_dll, GameInfo->dll_path, sizeof( GameInfo->game_dll ));
@@ -1529,8 +1588,6 @@ static qboolean FS_ParseGameInfo( const char *gamedir, gameinfo_t *GameInfo )
 #else
 	Q_strncpy( GameInfo->dll_path, "cl_dlls", sizeof( GameInfo->dll_path ));
 	Q_strncpy( GameInfo->game_dll, "dlls/hl.dll", sizeof( GameInfo->game_dll ));
-	Q_strncpy( GameInfo->game_dll_osx, "dlls/hl.dylib", sizeof( GameInfo->game_dll_osx ));
-	Q_strncpy( GameInfo->game_dll_linux, "dlls/hl.so", sizeof( GameInfo->game_dll_linux ));
 	Q_strncpy( GameInfo->client_lib, CLIENTDLL, sizeof( GameInfo->client_lib ));
 #endif
 	Q_strncpy( GameInfo->startmap, "", sizeof( GameInfo->startmap ));
@@ -1586,10 +1643,12 @@ static qboolean FS_ParseGameInfo( const char *gamedir, gameinfo_t *GameInfo )
 		else if( !Q_stricmp( token, "gamedll_osx" ))
 		{
 			pfile = COM_ParseFile( pfile, GameInfo->game_dll_osx );
+			found_osx = true;
 		}
 		else if( !Q_stricmp( token, "gamedll_linux" ))
 		{
 			pfile = COM_ParseFile( pfile, GameInfo->game_dll_linux );
+			found_linux = true;
 		}
 		else if( !Q_stricmp( token, "clientlib" ))
 		{
@@ -1717,6 +1776,22 @@ static qboolean FS_ParseGameInfo( const char *gamedir, gameinfo_t *GameInfo )
 		}
 	}
 
+#if !defined(ANDROID)
+	if( !found_linux || !found_osx )
+	{
+		// just replace extension from dll to so/dylib
+
+		char gamedll[64];
+		Q_strncpy( gamedll, GameInfo->game_dll, sizeof( gamedll ));
+		FS_StripExtension( gamedll );
+
+		if( !found_linux )
+			snprintf( GameInfo->game_dll_linux, sizeof( GameInfo->game_dll_linux ), "%s.so", gamedll );
+
+		if( !found_osx )
+			snprintf( GameInfo->game_dll_osx, sizeof( GameInfo->game_dll_osx ), "%s.dylib", gamedll );
+	}
+#endif
 	// make sure what gamedir is really exist
 	if( !FS_SysFolderExists( va( "%s\\%s", host.rootdir, GameInfo->gamedir )))
 		Q_strncpy( GameInfo->gamedir, gamedir, sizeof( GameInfo->gamedir ));
@@ -1764,6 +1839,8 @@ void FS_LoadGameInfo( const char *rootfolder )
 	{
 #if defined(_WIN32)
 		Q_strncpy( SI.gamedll, GI->game_dll, sizeof( SI.gamedll ) );
+#elif TARGET_OS_IPHONE || defined __EMSCRIPTEN__
+		Q_strncpy( SI.gamedll, "server", sizeof( SI.gamedll ) );
 #elif defined(__APPLE__)
 		Q_strncpy( SI.gamedll, GI->game_dll_osx, sizeof( SI.gamedll ) );
 #elif defined(__ANDROID__)
@@ -2128,7 +2205,7 @@ searchpath_t *FS_FindFile( const char *name, int* index, qboolean gamedironly )
 	// search through the path, one element at a time
 	for( search = fs_searchpaths; search; search = search->next )
 	{
-		if( gamedironly & !( search->flags & ( FS_GAMEDIR_PATH | FS_CUSTOM_PATH )))
+		if( gamedironly && !( search->flags & ( FS_GAMEDIR_PATH | FS_CUSTOM_PATH )))
 			continue;
 
 		// is the element a pak file?
@@ -3303,14 +3380,29 @@ WADSYSTEM PRIVATE COMMON FUNCTIONS
 =============================================================================
 */
 // associate extension with wad type
-static const wadtype_t wad_types[] =
+static const wadtype_t wad_types[6] =
 {
-{ "pal", TYP_QPAL	}, // palette
-{ "lmp", TYP_QPIC	}, // quake1, hl pic
-{ "fnt", TYP_QFONT	}, // hl qfonts
-{ "mip", TYP_MIPTEX	}, // hl/q1 mip
-{ "raw", TYP_RAW	}, // signed raw data
-{ NULL,  TYP_NONE	}
+{ "pal", TYP_PALETTE	}, // palette
+{ "dds", TYP_DDSTEX 	}, // DDS image
+{ "lmp", TYP_GFXPIC		}, // quake1, hl pic
+{ "fnt", TYP_QFONT		}, // hl qfonts
+{ "mip", TYP_MIPTEX		}, // hl/q1 mip
+{ NULL,  TYP_NONE		}
+};
+
+// suffix converts to img_type and back
+static const wadtype_t wad_hints[10] =
+{
+{ "",	 IMG_DIFFUSE	}, // no suffix
+{ "_mask", IMG_ALPHAMASK	}, // alpha-channel stored to another lump
+{ "_norm", IMG_NORMALMAP	}, // indexed normalmap
+{ "_spec", IMG_GLOSSMAP	}, // grayscale\color specular
+{ "_gpow", IMG_GLOSSPOWER	}, // grayscale gloss power
+{ "_hmap", IMG_HEIGHTMAP	}, // heightmap (can be converted to normalmap)
+{ "_luma", IMG_LUMA		}, // self-illuminate parts on the diffuse
+{ "_adec", IMG_DECAL_ALPHA	}, // classic HL-decal (with alpha-channel)
+{ "_cdec", IMG_DECAL_COLOR	}, // paranoia decal (base 127 127 127)
+{ NULL,    0		}  // terminator
 };
 
 static signed char W_TypeFromExt( const char *lumpname )
@@ -3324,12 +3416,19 @@ static signed char W_TypeFromExt( const char *lumpname )
 	
 	for( type = wad_types; type->ext; type++ )
 	{
-		if(!Q_stricmp( ext, type->ext ))
+		if( !Q_stricmp( ext, type->ext ))
 			return type->type;
 	}
 	return TYP_NONE;
 }
 
+/*
+===========
+W_ExtFromType
+
+Convert type to extension
+===========
+*/
 static const char *W_ExtFromType( signed char lumptype )
 {
 	const wadtype_t	*type;
@@ -3346,12 +3445,64 @@ static const char *W_ExtFromType( signed char lumptype )
 	return "";
 }
 
+/*
+===========
+W_HintFromSuf
+
+Convert name suffix into image type
+===========
+*/
+signed char W_HintFromSuf( const char *lumpname )
+{
+	char		barename[64];
+	char		suffix[8];
+	const wadtype_t	*hint;
+
+	// trying to extract hint from the name
+	FS_FileBase( lumpname, barename );
+	Q_strncpy( suffix, barename + Q_strlen( barename ) - HINT_NAMELEN, sizeof( suffix ));
+
+	// we not known about filetype, so match only by filename
+	for( hint = wad_hints; hint->ext; hint++ )
+	{
+		if( !Q_stricmp( suffix, hint->ext ))
+			return hint->type;
+	}
+
+	// no any special type was found
+	return IMG_DIFFUSE;
+}
+
 static dlumpinfo_t *W_FindLump( wfile_t *wad, const char *name, const signed char matchtype )
 {
-	int	left, right, middle;
+	signed char		img_type = IMG_DIFFUSE;
+	char		barename[64], suffix[8];
+	int		left, right;
+	const wadtype_t	*hint;
 
 	if( !wad || !wad->lumps || matchtype == TYP_NONE )
 		return NULL;
+
+	// trying to extract hint from the name
+	FS_FileBase( name, barename );
+
+	if( Q_strlen( barename ) >= HINT_NAMELEN )
+	{
+		Q_strncpy( suffix, barename + Q_strlen( barename ) - HINT_NAMELEN, sizeof( suffix ));
+
+		// we not known about filetype, so match only by filename
+		for( hint = wad_hints; hint->ext; hint++ )
+		{
+			if( !Q_stricmp( suffix, hint->ext ))
+			{
+				img_type = hint->type;
+				break;
+			}
+		}
+
+		if( img_type != IMG_DIFFUSE )
+			barename[Q_strlen( barename ) - HINT_NAMELEN] = '\0'; // kill the suffix
+	}
 
 	// look for the file (binary search)
 	left = 0;
@@ -3359,22 +3510,26 @@ static dlumpinfo_t *W_FindLump( wfile_t *wad, const char *name, const signed cha
 	
 	while( left <= right )
 	{
-		int	diff;
+		int	middle = (left + right) / 2;
+		int	diff = Q_stricmp( wad->lumps[middle].name, barename );
 
-		middle = (left + right) / 2;
-		diff = Q_stricmp( wad->lumps[middle].name, name );
-
-		// Found it
 		if( !diff )
 		{
-			if( matchtype == TYP_ANY || matchtype == wad->lumps[middle].type )
+			if( wad->lumps[middle].img_type > img_type )
+				diff = 1;
+			else if( wad->lumps[middle].img_type < img_type )
+				diff = -1;
+			else if(( matchtype == TYP_ANY ) || ( matchtype == wad->lumps[middle].type ))
 				return &wad->lumps[middle]; // found
-			else break;
+			else if( wad->lumps[middle].type < matchtype )
+				diff = 1;
+			else if( wad->lumps[middle].type > matchtype )
+				diff = -1;
+			else break; // not found
 		}
 
 		// if we're too far in the list
-		if( diff > 0 )
-			right = middle - 1;
+		if( diff > 0 ) right = middle - 1;
 		else left = middle + 1;
 	}
 
@@ -3388,10 +3543,18 @@ FS_AddFileToWad
 Add a file to the list of files contained into a package
 ====================
 */
-static dlumpinfo_t *W_AddFileToWad( const char *name, wfile_t *wad, int filepos, int packsize, int realsize, char type, char compression )
+static dlumpinfo_t *W_AddFileToWad( const char *name, wfile_t *wad, dlumpinfo_t *newlump )
 {
-	int		left, right, middle;
+	int		left, right;
 	dlumpinfo_t	*plump;
+
+	// convert all qmip types to miptex
+	if( newlump->type == TYP_RAWDATA )
+		newlump->type = TYP_MIPTEX;
+
+	// check for Quake 'conchars' issues (only lmp loader supposed to read this lame pic)
+	if( !Q_stricmp( newlump->name, "conchars" ) && newlump->type == TYP_RAWDATA )
+		newlump->type = TYP_GFXPIC; 
 
 	// look for the slot we should put that file into (binary search)
 	left = 0;
@@ -3399,38 +3562,34 @@ static dlumpinfo_t *W_AddFileToWad( const char *name, wfile_t *wad, int filepos,
 
 	while( left <= right )
 	{
-		int	diff;
+		int	middle = ( left + right ) / 2;
+		int	diff = Q_stricmp( wad->lumps[middle].name, name );
 
-		middle = ( left + right ) / 2;
-		diff = Q_stricmp( wad->lumps[middle].name, name );
-
-		// If we found the file, there's a problem
-		if( !diff ) MsgDev( D_NOTE, "Wad %s contains the file %s several times\n", wad->filename, name );
+		if( !diff )
+		{
+			if( wad->lumps[middle].img_type > newlump->img_type )
+				diff = 1;
+			else if( wad->lumps[middle].img_type < newlump->img_type )			
+				diff = -1;
+			else if( wad->lumps[middle].type < newlump->type )
+				diff = 1;
+			else if( wad->lumps[middle].type > newlump->type )
+				diff = -1;
+			else MsgDev( D_NOTE, "Wad %s contains the file %s several times\n", wad->filename, name );
+		}
 
 		// If we're too far in the list
 		if( diff > 0 ) right = middle - 1;
 		else left = middle + 1;
 	}
 
-	// We have to move the right of the list by one slot to free the one we need
+	// we have to move the right of the list by one slot to free the one we need
 	plump = &wad->lumps[left];
-	Q_memmove( plump + 1, plump, ( wad->numlumps - left ) * sizeof( *plump ));
+	memmove( plump + 1, plump, ( wad->numlumps - left ) * sizeof( *plump ));
 	wad->numlumps++;
 
-	Q_memcpy( plump->name, name, sizeof( plump->name ));
-	plump->filepos = filepos;
-	plump->disksize = realsize;
-	plump->size = packsize;
-	plump->compression = compression;
-
-	// convert all qmip types to miptex
-	if( type == TYP_QMIP )
-		plump->type = TYP_MIPTEX;
-	else plump->type = type;
-
-	// check for Quake 'conchars' issues (only lmp loader supposed to read this lame pic)
-	if( !Q_stricmp( plump->name, "conchars" ) && plump->type == TYP_QMIP )
-		plump->type = TYP_QPIC; 
+	*plump = *newlump;
+	memcpy( plump->name, name, sizeof( plump->name ));
 
 	return plump;
 }
@@ -3469,7 +3628,7 @@ static qboolean W_ReadLumpTable( wfile_t *wad )
 		k = Q_strlen( Q_strrchr( name, '*' ));
 		if( k ) name[Q_strlen( name ) - k] = '!'; // quake1 issues (can't save images that contain '*' symbol)
 
-		W_AddFileToWad( name, wad, srclumps[i].filepos, srclumps[i].size, srclumps[i].disksize, srclumps[i].type, srclumps[i].compression );
+		W_AddFileToWad( name, wad, &srclumps[i] );
 	}
 
 	// release source lumps
@@ -3478,7 +3637,7 @@ static qboolean W_ReadLumpTable( wfile_t *wad )
 	return true;
 }
 
-byte *W_ReadLump( wfile_t *wad, dlumpinfo_t *lump, size_t *lumpsizeptr )
+byte *W_ReadLump( wfile_t *wad, dlumpinfo_t *lump, fs_offset_t *lumpsizeptr )
 {
 	byte	*buf;
 	size_t	size = 0;
@@ -3684,6 +3843,7 @@ static byte *W_LoadFile( const char *path, fs_offset_t *lumpsizeptr, qboolean ga
 
 	search = FS_FindFile( path, &index, gamedironly );
 	if( search && search->wad )
-		return W_ReadLump( search->wad, &search->wad->lumps[index], (size_t *)lumpsizeptr ); 
+		return W_ReadLump( search->wad, &search->wad->lumps[index], lumpsizeptr ); 
 	return NULL;
 }
+

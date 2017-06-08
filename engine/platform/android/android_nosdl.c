@@ -12,12 +12,10 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
-
- #if defined(__ANDROID__) && !defined( XASH_SDL )
-
+#include "common.h"
+#if XASH_VIDEO == VIDEO_ANDROID
 #include "nanogl.h" //use NanoGL
 #include <pthread.h>
-#include "common.h"
 #include "input.h"
 #include "joyinput.h"
 #include "touch.h"
@@ -25,6 +23,7 @@ GNU General Public License for more details.
 #include <android/log.h>
 #include <jni.h>
 #include <EGL/egl.h> // nanogl
+#include <errno.h>
 convar_t *android_sleep;
 
 #ifndef JAVA_EXPORT
@@ -87,7 +86,11 @@ typedef enum event_type
 	event_joybutton,
 	event_joyaxis,
 	event_joyadd,
-	event_joyremove
+	event_joyremove,
+	event_onpause,
+	event_ondestroy,
+	event_onresume,
+	event_onfocuschange
 } eventtype_t;
 
 typedef struct touchevent_s
@@ -156,11 +159,13 @@ static struct {
 	volatile int count;
 	finger_t fingers[MAX_FINGERS];
 	char inputtext[256];
+	float mousex, mousey;
 } events = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER };
 
 static struct jnimethods_s
 {
 	jclass actcls;
+	JavaVM *vm;
 	JNIEnv *env;
 	jmethodID swapBuffers;
 	jmethodID toggleEGL;
@@ -169,6 +174,13 @@ static struct jnimethods_s
 	jmethodID messageBox;
 	jmethodID createGLContext;
 	jmethodID deleteGLContext;
+	jmethodID notify;
+	jmethodID setTitle;
+	jmethodID setIcon;
+	jmethodID getAndroidId;
+	jmethodID saveID;
+	jmethodID loadID;
+	jmethodID showMouse;
 	int width, height;
 } jni;
 
@@ -178,6 +190,11 @@ static struct nativeegl_s
 	EGLDisplay dpy;
 	EGLSurface surface;
 } negl;
+
+static struct jnimouse_s
+{
+	float x, y;
+} jnimouse;
 
 #define Android_Lock() pthread_mutex_lock(&events.mutex);
 #define Android_Unlock() pthread_mutex_unlock(&events.mutex);
@@ -236,9 +253,21 @@ void Android_RunEvents()
 
 		case event_key_down:
 			Key_Event( events.queue[i].arg, true );
+
+			if( events.queue[i].arg == K_AUX31 || events.queue[i].arg == K_AUX29 )
+			{
+				host.force_draw_version = true;
+				host.force_draw_version_time = host.realtime + FORCE_DRAW_VERSION_TIME;
+			}
 			break;
 		case event_key_up:
 			Key_Event( events.queue[i].arg, false );
+
+			if( events.queue[i].arg == K_AUX31 || events.queue[i].arg == K_AUX29 )
+			{
+				host.force_draw_version = true;
+				host.force_draw_version_time = host.realtime + FORCE_DRAW_VERSION_TIME;
+			}
 			break;
 
 		case event_set_pause:
@@ -250,6 +279,8 @@ void Android_RunEvents()
 				(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.toggleEGL, 1 );
 				Android_UpdateSurface();
 				Android_SwapInterval( Cvar_VariableInteger( "gl_swapinterval" ) );
+				host.force_draw_version = true;
+				host.force_draw_version_time = host.realtime + FORCE_DRAW_VERSION_TIME;
 			}
 			if( events.queue[i].arg )
 			{
@@ -298,6 +329,44 @@ void Android_RunEvents()
 				Joy_AddEvent( 0 );
 			Joy_ButtonEvent( events.queue[i].arg, events.queue[i].button.button, (byte)events.queue[i].button.down );
 			break;
+		case event_ondestroy:
+			//host.skip_configs = true; // skip config save, because engine may be killed during config save
+			Sys_Quit();
+			(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.notify );
+			break;
+		case event_onpause:
+#ifdef PARANOID_CONFIG_SAVE
+			switch( host.state )
+			{
+			case HOST_INIT:
+			case HOST_CRASHED:
+			case HOST_ERR_FATAL:
+				MsgDev( D_WARN, "Abnormal host state during onPause (%d), skipping config save!\n", host.state );
+				break;
+			default:
+				// restore all latched cheat cvars
+				Cvar_SetCheatState( true );
+				Host_WriteConfig();
+			}
+#endif
+			// disable sound during call/screen-off
+			S_Activate( false );
+			host.state = HOST_NOFOCUS;
+			// stop blocking UI thread
+			(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.notify );
+
+			break;
+		case event_onresume:
+			// re-enable sound after onPause
+			host.state = HOST_FRAME;
+			S_Activate( true );
+			host.force_draw_version = true;
+			host.force_draw_version_time = host.realtime + FORCE_DRAW_VERSION_TIME;
+			break;
+		case event_onfocuschange:
+			host.force_draw_version = true;
+			host.force_draw_version_time = host.realtime + FORCE_DRAW_VERSION_TIME;
+			break;
 		}
 	}
 
@@ -332,6 +401,11 @@ void Android_RunEvents()
 	}
 	events.inputtext[0] = 0; // no more text
 
+	jnimouse.x += events.mousex;
+	events.mousex = 0;
+	jnimouse.y += events.mousey;
+	events.mousey = 0;
+
 	//end events read
 	Android_Unlock();
 	pthread_mutex_lock( &events.framemutex );
@@ -352,7 +426,12 @@ nativeString
 nativeSetPause
 =====================================================
 */
-JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_nativeInit(JNIEnv* env, jclass cls, jobject array)
+#define DECLARE_JNI_INTERFACE( ret, name, ... ) \
+	JNIEXPORT ret JNICALL Java_in_celest_xash3d_XashActivity_##name( JNIEnv *env, jclass clazz, __VA_ARGS__ )
+#define DECLARE_JNI_INTERFACE_VOID( ret, name ) \
+	JNIEXPORT ret JNICALL Java_in_celest_xash3d_XashActivity_##name( JNIEnv *env, jclass clazz )
+
+DECLARE_JNI_INTERFACE( int, nativeInit, jobject array )
 {
 	int i;
 	int argc;
@@ -393,6 +472,13 @@ JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_nativeInit(JNIEnv* env, jclas
 	jni.messageBox = (*env)->GetStaticMethodID(env, jni.actcls, "messageBox", "(Ljava/lang/String;Ljava/lang/String;)V");
 	jni.createGLContext = (*env)->GetStaticMethodID(env, jni.actcls, "createGLContext", "()Z");
 	jni.deleteGLContext = (*env)->GetStaticMethodID(env, jni.actcls, "deleteGLContext", "()Z");
+	jni.notify = (*env)->GetStaticMethodID(env, jni.actcls, "engineThreadNotify", "()V");
+	jni.setTitle = (*env)->GetStaticMethodID(env, jni.actcls, "setTitle", "(Ljava/lang/String;)V");
+	jni.setIcon = (*env)->GetStaticMethodID(env, jni.actcls, "setIcon", "(Ljava/lang/String;)V");
+	jni.getAndroidId = (*env)->GetStaticMethodID(env, jni.actcls, "getAndroidID", "()Ljava/lang/String;");
+	jni.saveID = (*env)->GetStaticMethodID(env, jni.actcls, "saveID", "(Ljava/lang/String;)V");
+	jni.loadID = (*env)->GetStaticMethodID(env, jni.actcls, "loadID", "()Ljava/lang/String;");
+	jni.showMouse = (*env)->GetStaticMethodID(env, jni.actcls, "showMouse", "(I)V");
 
 	nanoGL_Init();
 	/* Run the application. */
@@ -407,7 +493,7 @@ JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_nativeInit(JNIEnv* env, jclas
 	return status;
 }
 
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_onNativeResize( JNIEnv* env, jclass cls, jint width, jint height )
+DECLARE_JNI_INTERFACE( void, onNativeResize, jint width, jint height )
 {
 	event_t *event;
 
@@ -422,10 +508,11 @@ JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_onNativeResize( JNIEnv* env,
 	Android_PushEvent();
 }
 
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeQuit(JNIEnv* env, jclass cls)
+DECLARE_JNI_INTERFACE_VOID( void, nativeQuit )
 {
 }
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeSetPause(JNIEnv* env, jclass cls, jint pause )
+
+DECLARE_JNI_INTERFACE( void, nativeSetPause, jint pause )
 {
 	event_t *event = Android_AllocEvent();
 	event->type = event_set_pause;
@@ -443,26 +530,37 @@ JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeSetPause(JNIEnv* env, 
 	}
 }
 
-JAVA_EXPORT void Java_in_celest_xash3d_XashActivity_nativeKey(JNIEnv* env, jclass cls, jint down, jint code)
+DECLARE_JNI_INTERFACE_VOID( void, nativeUnPause )
+{
+	// UnPause engine before sending critical events
+	if( android_sleep && android_sleep->integer )
+			pthread_mutex_unlock( &events.framemutex );
+}
+
+DECLARE_JNI_INTERFACE( void, nativeKey, jint down, jint code )
 {
 	event_t *event;
 
-	if( code >= ( sizeof( s_android_scantokey ) / sizeof( s_android_scantokey[0] ) ) )
-		return;
-
-	event = Android_AllocEvent();
-
-	if( down )
-		event->type = event_key_down;
+	if( code < 0 )
+	{
+		event = Android_AllocEvent();
+		event->arg = (-code) & 255;
+		event->type = down?event_key_down:event_key_up;
+		Android_PushEvent();
+	}
 	else
-		event->type = event_key_up;
+	{
+		if( code >= ( sizeof( s_android_scantokey ) / sizeof( s_android_scantokey[0] ) ) )
+			return;
 
-	event->arg = s_android_scantokey[code];
-
-	Android_PushEvent();
+		event = Android_AllocEvent();
+		event->type = down?event_key_down:event_key_up;
+		event->arg = s_android_scantokey[code];
+		Android_PushEvent();
+	}
 }
 
-void Java_in_celest_xash3d_XashActivity_nativeString(JNIEnv* env, jclass cls, jobject string)
+DECLARE_JNI_INTERFACE( void, nativeString, jobject string )
 {
 	char* str = (char *) (*env)->GetStringUTFChars(env, string, NULL);
 
@@ -474,9 +572,9 @@ void Java_in_celest_xash3d_XashActivity_nativeString(JNIEnv* env, jclass cls, jo
 }
 
 #ifdef SOFTFP_LINK
-void Java_in_celest_xash3d_XashActivity_nativeTouch(JNIEnv* env, jclass cls, jint finger, jint action, jfloat x, jfloat y ) __attribute__((pcs("aapcs")));
+DECLARE_JNI_INTERFACE( void, nativeTouch, jint finger, jint action, jfloat x, jfloat y ) __attribute__((pcs("aapcs")));
 #endif
-void Java_in_celest_xash3d_XashActivity_nativeTouch(JNIEnv* env, jclass cls, jint finger, jint action, jfloat x, jfloat y )
+DECLARE_JNI_INTERFACE( void, nativeTouch, jint finger, jint action, jfloat x, jfloat y )
 {
 	float dx, dy;
 	event_t *event;
@@ -526,19 +624,6 @@ void Java_in_celest_xash3d_XashActivity_nativeTouch(JNIEnv* env, jclass cls, jin
 	event->touch.dy = dy;
 	Android_PushEvent();
 }
-
-JAVA_EXPORT int Java_in_celest_xash3d_XashActivity_setenv( JNIEnv* env, jclass clazz, jstring key, jstring value, jboolean overwrite )
-{
-	char* k = (char *) (*env)->GetStringUTFChars(env, key, NULL);
-	char* v = (char *) (*env)->GetStringUTFChars(env, value, NULL);
-	int err = setenv(k, v, overwrite);
-	(*env)->ReleaseStringUTFChars(env, key, k);
-	(*env)->ReleaseStringUTFChars(env, value, v);
-	return err;
-}
-
-#define DECLARE_JNI_INTERFACE( ret, name, ... ) \
-	JAVA_EXPORT ret Java_in_celest_xash3d_XashActivity_##name( JNIEnv *env, jclass clazz, __VA_ARGS__ )
 
 DECLARE_JNI_INTERFACE( void, nativeBall, jint id, jbyte ball, jshort xrel, jshort yrel )
 {
@@ -610,6 +695,88 @@ DECLARE_JNI_INTERFACE( void, nativeJoyDel, jint id )
 	event->arg = id;
 	Android_PushEvent();
 }
+
+DECLARE_JNI_INTERFACE_VOID( void, nativeOnResume )
+{
+	event_t *event = Android_AllocEvent();
+	event->type = event_onresume;
+	Android_PushEvent();
+}
+
+DECLARE_JNI_INTERFACE_VOID( void, nativeOnFocusChange )
+{
+	event_t *event = Android_AllocEvent();
+	event->type = event_onfocuschange;
+	Android_PushEvent();
+}
+
+DECLARE_JNI_INTERFACE_VOID( void, nativeOnPause )
+{
+	event_t *event = Android_AllocEvent();
+	event->type = event_onpause;
+	Android_PushEvent();
+}
+
+DECLARE_JNI_INTERFACE_VOID( void, nativeOnDestroy )
+{
+	event_t *event = Android_AllocEvent();
+	event->type = event_ondestroy;
+	Android_PushEvent();
+}
+
+DECLARE_JNI_INTERFACE( int, setenv, jstring key, jstring value, jboolean overwrite )
+{
+	char* k = (char *) (*env)->GetStringUTFChars(env, key, NULL);
+	char* v = (char *) (*env)->GetStringUTFChars(env, value, NULL);
+	int err = setenv(k, v, overwrite);
+	(*env)->ReleaseStringUTFChars(env, key, k);
+	(*env)->ReleaseStringUTFChars(env, value, v);
+	return err;
+}
+
+
+DECLARE_JNI_INTERFACE( void, nativeMouseMove, jfloat x, jfloat y )
+{
+	Android_Lock();
+	events.mousex += x;
+	events.mousey += y;
+	Android_Unlock();
+}
+
+DECLARE_JNI_INTERFACE( int, nativeTestWritePermission, jstring jPath )
+{
+	char *path = (char *)(*env)->GetStringUTFChars(env, jPath, NULL);
+	FILE *fd;
+	char testFile[PATH_MAX];
+	int ret = 0;
+	
+	// maybe generate new file everytime?
+	Q_snprintf( testFile, PATH_MAX, "%s/.testfile", path );
+	
+	fd = fopen( testFile, "w+" );
+	
+	if( fd )
+	{
+		ret = 1;
+		fclose( fd );
+		
+		remove( testFile );
+	}
+	else
+	{
+		__android_log_print( ANDROID_LOG_VERBOSE, "Xash", "nativeTestWritePermission: file=%s, error=%s", testFile, strerror( errno ) );
+	}
+	
+	(*env)->ReleaseStringUTFChars( env, jPath, path );
+	
+	return ret;
+}
+
+JNIEXPORT jint JNICALL JNI_OnLoad( JavaVM *vm, void *reserved )
+{
+	return JNI_VERSION_1_6;
+}
+
 
 /*
 ========================
@@ -750,6 +917,31 @@ void Android_Vibrate( float life, char flags )
 		(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.vibrate, (int)life );
 }
 
+/*
+========================
+Android_GetNativeObject
+========================
+*/
+void *Android_GetNativeObject( const char *objName )
+{
+	static const char *availObjects[] = { "JNIEnv", "ActivityClass", NULL };
+	void *object = NULL;
+	
+	if( !objName )
+	{
+		object = (void*)availObjects;
+	}
+	else if( !strcasecmp( objName, "JNIEnv" ) )
+	{
+		object = (void*)jni.env;
+	}
+	else if( !strcasecmp( objName, "ActivityClass" ) )
+	{
+		object = (void*)jni.actcls;
+	}
+	
+	return object;
+}
 
 /*
 ========================
@@ -776,6 +968,72 @@ void Android_SwapInterval( int interval )
 	// so only native backend supported
 	if( negl.valid )
 		eglSwapInterval( negl.dpy, interval );
+}
+
+void Android_SetTitle( const char *title )
+{
+	(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.setTitle, (*jni.env)->NewStringUTF( jni.env, title ) );
+}
+
+void Android_SetIcon( const char *path )
+{
+	(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.setIcon, (*jni.env)->NewStringUTF( jni.env, path ) );
+
+}
+
+const char *Android_GetAndroidID( void )
+{
+	static char id[65];
+
+	if( id[0] )
+		return id;
+
+	jstring resultJNIStr = (jstring)(*jni.env)->CallStaticObjectMethod( jni.env, jni.actcls, jni.getAndroidId );
+	const char *resultCStr = (*jni.env)->GetStringUTFChars( jni.env, resultJNIStr, NULL );
+	Q_strncpy( id, resultCStr, 64 );
+	(*jni.env)->ReleaseStringUTFChars( jni.env, resultJNIStr, resultCStr );
+
+	if( !id[0] )
+		return NULL;
+
+	return id;
+}
+
+const char *Android_LoadID( void )
+{
+	static char id[65];
+	jstring resultJNIStr = (jstring)(*jni.env)->CallStaticObjectMethod( jni.env, jni.actcls, jni.loadID );
+	const char *resultCStr = (*jni.env)->GetStringUTFChars( jni.env, resultJNIStr, NULL );
+	Q_strncpy( id, resultCStr, 64 );
+	(*jni.env)->ReleaseStringUTFChars( jni.env, resultJNIStr, resultCStr );
+	return id;
+}
+
+void Android_SaveID( const char *id )
+{
+	(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.saveID, (*jni.env)->NewStringUTF( jni.env, id ) );
+}
+
+void Android_MouseMove( float *x, float *y )
+{
+	*x = jnimouse.x;
+	*y = jnimouse.y;
+	jnimouse.x = 0;
+	jnimouse.y = 0;
+	//MsgDev( D_INFO, "Android_MouseMove: %f %f\n", *x, *y );
+}
+
+void Android_AddMove( float x, float y)
+{
+	jnimouse.x += x;
+	jnimouse.y += y;
+}
+
+void Android_ShowMouse( qboolean show )
+{
+	if( m_ignore->integer )
+		show = true;
+	(*jni.env)->CallStaticVoidMethod( jni.env, jni.actcls, jni.showMouse, show );
 }
 
 #endif

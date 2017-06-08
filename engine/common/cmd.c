@@ -145,7 +145,7 @@ void Cbuf_InsertText( const char *text )
 Cbuf_Execute
 ============
 */
-void Cbuf_Execute( void )
+void GAME_EXPORT Cbuf_Execute( void )
 {
 	int		i;
 	char	*text;
@@ -360,6 +360,13 @@ static void Cmd_Alias_f( void )
 	}
 
 	// if the alias already exists, reuse it
+#if defined( XASH_HASHED_VARS )
+	a = BaseCmd_Find( HM_CMDALIAS, s );
+	if( a )
+	{
+		Mem_Free( a->value );
+	}
+#else
 	for( a = cmd_alias; a; a = a->next )
 	{
 		if( !Q_strcmp( s, a->name ))
@@ -368,6 +375,7 @@ static void Cmd_Alias_f( void )
 			break;
 		}
 	}
+#endif
 
 	if( !a )
 	{
@@ -384,6 +392,10 @@ static void Cmd_Alias_f( void )
 			cmd_alias = a;
 		}
 		a->next = current;
+
+#if defined( XASH_HASHED_VARS )
+		BaseCmd_Insert( HM_CMDALIAS, a, a->name );
+#endif
 	}
 
 	// copy the rest of the command line
@@ -428,11 +440,13 @@ static void Cmd_UnAlias_f ( void )
 	for( i = 1; i < Cmd_Argc(); ++i )
 	{
 		s = Cmd_Argv( i );
-		p = NULL;
-		for( a = cmd_alias; a; p = a, a = a->next )
+		for( p = NULL, a = cmd_alias; a; p = a, a = a->next )
 		{
 			if( !Q_strcmp( s, a->name ))
 			{
+#if defined( XASH_HASHED_VARS )
+				BaseCmd_Remove( HM_CMDALIAS, p, a->name );
+#endif
 				if( a == cmd_alias )
 					cmd_alias = a->next;
 				if( p )
@@ -456,11 +470,11 @@ static void Cmd_UnAlias_f ( void )
 */
 typedef struct cmd_s
 {
-	struct cmd_s	*next;
-	char		*name;
-	xcommand_t	function;
-	char		*desc;
-	int		flags;
+	char		 *name; // must be first, to match cvar_t
+	struct cmd_s *next;
+	xcommand_t	 function;
+	char		 *desc;
+	int          flags;
 } cmd_t;
 
 static int		cmd_argc;
@@ -475,7 +489,7 @@ cmd_source_t		cmd_source;
 Cmd_Argc
 ============
 */
-int Cmd_Argc( void )
+int GAME_EXPORT Cmd_Argc( void )
 {
 	return cmd_argc;
 }
@@ -485,7 +499,7 @@ int Cmd_Argc( void )
 Cmd_Argv
 ============
 */
-char *Cmd_Argv( int arg )
+char *GAME_EXPORT Cmd_Argv( int arg )
 {
 	if( arg >= cmd_argc )
 		return "";
@@ -497,7 +511,7 @@ char *Cmd_Argv( int arg )
 Cmd_Args
 ============
 */
-char *Cmd_Args( void )
+char *GAME_EXPORT Cmd_Args( void )
 {
 	return cmd_args;
 }
@@ -507,7 +521,7 @@ char *Cmd_Args( void )
 Cmd_AliasGetList
 ============
 */
-cmdalias_t *Cmd_AliasGetList( void )
+cmdalias_t *GAME_EXPORT Cmd_AliasGetList( void )
 {
 	return cmd_alias;
 }
@@ -517,7 +531,7 @@ cmdalias_t *Cmd_AliasGetList( void )
 Cmd_GetList
 ============
 */
-cmd_t *Cmd_GetFirstFunctionHandle( void )
+cmd_t *GAME_EXPORT Cmd_GetFirstFunctionHandle( void )
 {
 	return cmd_functions;
 }
@@ -527,7 +541,7 @@ cmd_t *Cmd_GetFirstFunctionHandle( void )
 Cmd_GetNext
 ============
 */
-cmd_t *Cmd_GetNextFunctionHandle( cmd_t *cmd )
+cmd_t *GAME_EXPORT Cmd_GetNextFunctionHandle( cmd_t *cmd )
 {
 	return (cmd) ? cmd->next : NULL;
 }
@@ -537,7 +551,7 @@ cmd_t *Cmd_GetNextFunctionHandle( cmd_t *cmd )
 Cmd_GetName
 ============
 */
-char *Cmd_GetName( cmd_t *cmd )
+char *GAME_EXPORT Cmd_GetName( cmd_t *cmd )
 {
 	return cmd->name;
 }
@@ -643,6 +657,9 @@ void Cmd_AddCommand( const char *cmd_name, xcommand_t function, const char *cmd_
 		cmd_functions = cmd;
 	}
 	cmd->next = current;
+#if defined(XASH_HASHED_VARS)
+	BaseCmd_Insert( HM_CMD, cmd, cmd->name );
+#endif
 }
 
 /*
@@ -650,7 +667,7 @@ void Cmd_AddCommand( const char *cmd_name, xcommand_t function, const char *cmd_
 Cmd_AddGameCommand
 ============
 */
-void Cmd_AddGameCommand( const char *cmd_name, xcommand_t function )
+void GAME_EXPORT Cmd_AddGameCommand( const char *cmd_name, xcommand_t function )
 {
 	cmd_t	*cmd;
 	cmd_t	*prev, *current;
@@ -691,6 +708,10 @@ void Cmd_AddGameCommand( const char *cmd_name, xcommand_t function )
 		cmd_functions = cmd;
 	}
 	cmd->next = current;
+
+#if defined(XASH_HASHED_VARS)
+	BaseCmd_Insert( HM_CMD, cmd, cmd->name );
+#endif
 }
 
 /*
@@ -739,6 +760,10 @@ void Cmd_AddClientCommand( const char *cmd_name, xcommand_t function )
 		cmd_functions = cmd;
 	}
 	cmd->next = current;
+
+#if defined(XASH_HASHED_VARS)
+	BaseCmd_Insert( HM_CMD, cmd, cmd->name );
+#endif
 }
 
 /*
@@ -754,6 +779,10 @@ void Cmd_RemoveCommand( const char *cmd_name )
 	{
 		if( !Q_strcmp( cmd_name, cmd->name ))
 		{
+#if defined(XASH_HASHED_VARS)
+			BaseCmd_Remove( HM_CMD, cmd, cmd->name );
+#endif
+
 			*prev = cmd->next;
 
 			Mem_Free( cmd->name );
@@ -798,12 +827,18 @@ qboolean Cmd_Exists( const char *cmd_name )
 {
 	cmd_t	*cmd;
 
+#if defined(XASH_HASHED_VARS)
+	if( BaseCmd_Find( HM_CMD, cmd_name ) )
+		return true;
+	return false;
+#else
 	for( cmd = cmd_functions; cmd; cmd = cmd->next )
 	{
 		if( !Q_strcmp( cmd_name, cmd->name ))
 			return true;
 	}
 	return false;
+#endif
 }
 
 /*
@@ -813,10 +848,11 @@ Cmd_If_f
 Compare and et condition bit if true
 ============
 */
+#define BIT64(x) ( (uint64_t)1 << x )
 void Cmd_If_f( void )
 {
 	// reset bit first
-	cmd_cond &= ~BIT( cmd_condlevel );
+	cmd_cond &= ~BIT64( cmd_condlevel );
 
 	// usage
 	if( cmd_argc == 1 )
@@ -834,7 +870,7 @@ void Cmd_If_f( void )
 	else if( cmd_argc == 2 )
 	{
 		if( Q_atof( cmd_argv[1] ) )
-			cmd_cond |= BIT( cmd_condlevel );
+			cmd_cond |= BIT64( cmd_condlevel );
 	}
 	else if( cmd_argc == 4 )
 	{
@@ -850,20 +886,20 @@ void Cmd_If_f( void )
 		{
 			if( !Q_strcmp( cmd_argv[1], cmd_argv[3] ) || 
 				( ( f1 || f2 ) && ( f1 == f2 ) ) )
-				cmd_cond |= BIT( cmd_condlevel );
+				cmd_cond |= BIT64( cmd_condlevel );
 		}
 
 		if( cmd_argv[2][0] == '!' ) 					// !=
 		{
-			cmd_cond ^= BIT( cmd_condlevel );
+			cmd_cond ^= BIT64( cmd_condlevel );
 			return;
 		}
 
 		if( ( cmd_argv[2][0] == '>' ) && ( f1 > f2 ) )	// >, >=
-			cmd_cond |= BIT( cmd_condlevel );
+			cmd_cond |= BIT64( cmd_condlevel );
 		
 		if( ( cmd_argv[2][0] == '<' ) && ( f1 < f2 ) )	// <, <=
-			cmd_cond |= BIT( cmd_condlevel );
+			cmd_cond |= BIT64( cmd_condlevel );
 	}
 }
 
@@ -877,7 +913,7 @@ Invert condition bit
 */
 void Cmd_Else_f( void )
 {
-	cmd_cond ^= BIT( cmd_condlevel );
+	cmd_cond ^= BIT64( cmd_condlevel );
 }
 
 /*
@@ -935,7 +971,7 @@ void Cmd_ExecuteString( const char *text, cmd_source_t src )
 
 		while( *text == ':' )
 		{
-			if( !( cmd_cond & BIT( cmd_condlevel ) ) )
+			if( !( cmd_cond & BIT64( cmd_condlevel ) ) )
 				return;
 			cmd_condlevel++;
 			text++;
@@ -948,6 +984,14 @@ void Cmd_ExecuteString( const char *text, cmd_source_t src )
 	if( !Cmd_Argc()) return; // no tokens
 
 	// check aliases
+#if defined(XASH_HASHED_VARS)
+	a = BaseCmd_Find(HM_CMDALIAS, cmd_argv[0] );
+	if( a )
+	{
+		Cbuf_InsertText( a->value );
+		return;
+	}
+#else
 	for( a = cmd_alias; a; a = a->next )
 	{
 		if( !Q_stricmp( cmd_argv[0], a->name ))
@@ -956,8 +1000,17 @@ void Cmd_ExecuteString( const char *text, cmd_source_t src )
 			return;
 		}
 	}
+#endif
 
 	// check functions
+#if defined(XASH_HASHED_VARS)
+	cmd = BaseCmd_Find( HM_CMD, cmd_argv[0] );
+	if( cmd && cmd->function )
+	{
+		cmd->function();
+		return;
+	}
+#else
 	for( cmd = cmd_functions; cmd; cmd = cmd->next )
 	{
 		if( !Q_stricmp( cmd_argv[0], cmd->name ) && cmd->function )
@@ -966,6 +1019,7 @@ void Cmd_ExecuteString( const char *text, cmd_source_t src )
 			return;
 		}
 	}
+#endif
 
 	// check cvars
 	if( Cvar_Command( )) return;
@@ -1142,7 +1196,7 @@ static void Cmd_Apropos_f( void )
 	{
 		// proceed a bit differently here as an alias value always got a final \n
 		if( !matchpattern_with_separator( alias->name, partial, true, "", false ))
-		if( !matchpattern_with_separator( alias->value, partial, true, "\n", false )) // when \n is a separator, wildcards don't match it
+		if( !matchpattern_with_separator( alias->value, partial, true, "\n", false )) // when \n is a separator, wildcards don't match it //-V666
 			continue;
 
 		Msg( "alias ^5%s^7: %s", alias->name, alias->value ); // do not print an extra \n
@@ -1183,6 +1237,10 @@ void Cmd_Unlink( int group )
 			prev = &cmd->next;
 			continue;
 		}
+
+#if defined(XASH_HASHED_VARS)
+		BaseCmd_Remove( HM_CMD, cmd, cmd->name );
+#endif
 
 		*prev = cmd->next;
 

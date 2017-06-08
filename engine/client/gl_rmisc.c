@@ -199,8 +199,8 @@ void R_CreateDetailTexturesList( const char *filename )
 
 			if( pic )
 			{
-				xScale = (pic->width / tex->width) * gl_detailscale->value;
-				yScale = (pic->height / tex->height) * gl_detailscale->value;
+				xScale = (pic->width / (float)tex->width) * gl_detailscale->value;
+				yScale = (pic->height / (float)tex->height) * gl_detailscale->value;
 				FS_FreeImage( pic );
 			}
 			else xScale = yScale = 10.0f;
@@ -216,7 +216,9 @@ void R_CreateDetailTexturesList( const char *filename )
 void R_ParseDetailTextures( const char *filename )
 {
 	char	*afile, *pfile;
-	string	token, texname, detail_texname;
+	string	token, texname;
+	string	detail_texname;
+	string	detail_path;
 	float	xScale, yScale;
 	texture_t	*tex;
 	int	i;
@@ -236,6 +238,7 @@ void R_ParseDetailTextures( const char *filename )
 	while(( pfile = COM_ParseFile( pfile, token )) != NULL )
 	{
 		texname[0] = '\0';
+		detail_texname[0] = '\0';
 
 		// read texname
 		if( token[0] == '{' )
@@ -250,10 +253,23 @@ void R_ParseDetailTextures( const char *filename )
 
 		// read detailtexture name
 		pfile = COM_ParseFile( pfile, token );
-		Q_snprintf( detail_texname, sizeof( detail_texname ), "gfx/%s", token );
+		Q_strncat( detail_texname, token, sizeof( detail_texname ));
+
+		// trying the scales or '{'
+		pfile = COM_ParseFile( pfile, token );
+
+		// read second part of detailtexture name
+		if( token[0] == '{' )
+		{
+			Q_strncat( detail_texname, token, sizeof( detail_texname ));
+			pfile = COM_ParseFile( pfile, token ); // read scales
+			Q_strncat( detail_texname, token, sizeof( detail_texname ));
+			pfile = COM_ParseFile( pfile, token ); // parse scales
+		}
+
+		Q_snprintf( detail_path, sizeof( detail_path ), "gfx/%s", detail_texname );
 
 		// read scales
-		pfile = COM_ParseFile( pfile, token );
 		xScale = Q_atof( token );		
 
 		pfile = COM_ParseFile( pfile, token );
@@ -270,7 +286,7 @@ void R_ParseDetailTextures( const char *filename )
 			if( Q_stricmp( tex->name, texname ))
 				continue;
 
-			tex->dt_texturenum = GL_LoadTexture( detail_texname, NULL, 0, TF_FORCE_COLOR, NULL );
+			tex->dt_texturenum = GL_LoadTexture( detail_path, NULL, 0, TF_FORCE_COLOR, NULL );
 
 			// texture is loaded
 			if( tex->dt_texturenum )

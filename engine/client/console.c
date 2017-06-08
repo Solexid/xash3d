@@ -29,6 +29,8 @@ convar_t	*con_halffrac;
 convar_t	*con_charset;
 convar_t	*con_alpha;
 convar_t	*con_black;
+convar_t	*con_fontscale;
+convar_t	*con_fontnum;
 
 static int g_codepage = 0;
 static qboolean g_utf8 = false;
@@ -113,9 +115,12 @@ void Field_CharEvent( field_t *edit, int ch );
 Con_Clear_f
 ================
 */
-void Con_Clear_f( void )
+void Con_Clear( void )
 {
 	int	i;
+
+	if( !con.initialized )
+		return;
 
 	for( i = 0; i < CON_TEXTSIZE; i++ )
 		con.text[i] = ( ColorIndex( COLOR_DEFAULT ) << 8 ) | ' ';
@@ -183,7 +188,7 @@ Con_ClearTyping
 */
 void Con_ClearTyping( void )
 {
-	int	i;
+//	int	i;
 
 	Con_ClearField( &con.input );
 	con.input.widthInChars = con.linewidth;
@@ -404,7 +409,7 @@ void Con_Bottom( void )
 Con_Visible
 ================
 */
-qboolean Con_Visible( void )
+qboolean GAME_EXPORT Con_Visible( void )
 {
 	return (con.displayFrac != 0.0f);
 }
@@ -451,7 +456,7 @@ static void Con_LoadConsoleFont( int fontNumber, cl_font_t *font )
 		int	i;
 
 		src = (qfont_t *)buffer;
-		font->charHeight = src->rowheight;
+		font->charHeight = src->rowheight * con_fontscale->value;
 
 		// build rectangles
 		for( i = 0; i < 256; i++ )
@@ -460,7 +465,7 @@ static void Con_LoadConsoleFont( int fontNumber, cl_font_t *font )
 			font->fontRc[i].right = font->fontRc[i].left + src->fontinfo[i].charwidth;
 			font->fontRc[i].top = (word)src->fontinfo[i].startoffset / fontWidth;
 			font->fontRc[i].bottom = font->fontRc[i].top + src->rowheight;
-			font->charWidths[i] = src->fontinfo[i].charwidth;
+			font->charWidths[i] = src->fontinfo[i].charwidth * con_fontscale->value;
 		}
 		font->valid = true;
 	}
@@ -481,7 +486,9 @@ static void Con_LoadConchars( void )
 		Con_LoadConsoleFont( i, con.chars + i );
 
 	// select properly fontsize
-	if( scr_width->integer <= 640 )
+	if( con_fontnum->integer >= 0 && con_fontnum->integer <= 2)
+		fontSize = con_fontnum->integer;
+	else if( scr_width->integer <= 640 )
 		fontSize = 0;
 	else if( scr_width->integer >= 1280 )
 		fontSize = 2;
@@ -585,7 +592,7 @@ int Con_UtfProcessCharForce( int in )
 	return 0;
 }
 
-int Con_UtfProcessChar( int in )
+int GAME_EXPORT Con_UtfProcessChar( int in )
 {
 	if( !g_utf8 )
 		return in;
@@ -601,7 +608,8 @@ get position of previous printful char
 */
 int Con_UtfMoveLeft( char *str, int pos )
 {
-	int i, j, k = 0;
+	int i, k = 0;
+	// int j;
 	if( !g_utf8 )
 		return pos - 1;
 	Con_UtfProcessChar( 0 );
@@ -639,6 +647,7 @@ int Con_DrawGenericChar( int x, int y, int number, rgba_t color )
 {
 	int	width, height;
 	float	s1, t1, s2, t2;
+	int w, h;
 	wrect_t	*rc;
 
 	number &= 255;
@@ -655,18 +664,18 @@ int Con_DrawGenericChar( int x, int y, int number, rgba_t color )
 	rc = &con.curFont->fontRc[number];
 
 	pglColor4ubv( color );
-	R_GetTextureParms( &width, &height, con.curFont->hFontTexture );
+	R_GetTextureParms( &w, &h, con.curFont->hFontTexture );
 
 	// calc rectangle
-	s1 = (float)rc->left / width;
-	t1 = (float)rc->top / height;
-	s2 = (float)rc->right / width;
-	t2 = (float)rc->bottom / height;
-	width = rc->right - rc->left;
-	height = rc->bottom - rc->top;
+	s1 = (float)rc->left / (float)w;
+	t1 = (float)rc->top / (float)h;
+	s2 = (float)rc->right / (float)w;
+	t2 = (float)rc->bottom / (float)h;
+	width = (rc->right - rc->left) * con_fontscale->value;
+	height = (rc->bottom - rc->top) * con_fontscale->value;
 
 	TextAdjustSize( &x, &y, &width, &height );
-	R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, con.curFont->hFontTexture );		
+	R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, con.curFont->hFontTexture );
 	pglColor4ub( 255, 255, 255, 255 ); // don't forget reset color
 
 	return con.curFont->charWidths[number];
@@ -710,7 +719,7 @@ void Con_DrawStringLen( const char *pText, int *length, int *height )
 	{
 		byte	c = *pText;
 
-		if( *pText == '\n' )
+		if( *pText == '\n' ) //-V595
 		{
 			pText++;
 			curLength = 0;
@@ -759,7 +768,7 @@ int Con_DrawGenericString( int x, int y, const char *string, rgba_t setColor, qb
 	s = string;
 	*(uint *)color = *(uint *)setColor;
 
-	while ( *s )
+	while ( s && *s )
 	{
 		if( *s == '\n' )
 		{
@@ -814,12 +823,14 @@ void Con_Init( void )
 	scr_height = Cvar_Get( "height", "480", CVAR_RENDERINFO, "screen height" );
 	scr_conspeed = Cvar_Get( "scr_conspeed", "600", 0, "console moving speed" );
 	con_notifytime = Cvar_Get( "con_notifytime", "3", 0, "notify time to live" );
-	con_fontsize = Cvar_Get( "con_fontsize", "1", CVAR_ARCHIVE, "console font number (0, 1 or 2)" );
-	con_maxfrac = Cvar_Get( "con_maxfrac", "1.0", CVAR_ARCHIVE, "console max height" );
+	con_fontsize = Cvar_Get( "con_fontsize", "1", CVAR_ARCHIVE, "chat or client font number (0, 1 or 2)" );
+	con_maxfrac = Cvar_Get( "con_maxfrac", DEFAULT_CON_MAXFRAC, CVAR_ARCHIVE, "console max height" );
 	con_halffrac = Cvar_Get( "con_halffrac", "0.5", CVAR_ARCHIVE, "console half height" );
 	con_charset = Cvar_Get( "con_charset", "cp1251", CVAR_ARCHIVE, "console font charset (only cp1251 supported now)" );
 	con_alpha = Cvar_Get( "con_alpha", "1.0", CVAR_ARCHIVE, "console alpha value" );
 	con_black = Cvar_Get( "con_black", "0", CVAR_ARCHIVE, "make console black like a nigga" );
+	con_fontscale = Cvar_Get( "con_fontscale", "1.0", CVAR_ARCHIVE, "scale font texture" );
+	con_fontnum = Cvar_Get( "con_fontnum", "-1", CVAR_ARCHIVE, "console font number (0, 1 or 2), -1 for autoselect" );
 
 	Con_CheckResize();
 
@@ -839,7 +850,6 @@ void Con_Init( void )
 
 	Cmd_AddCommand( "toggleconsole", Con_ToggleConsole_f, "opens or closes the console" );
 	Cmd_AddCommand( "con_color", Con_SetColor_f, "set a custom console color" );
-	Cmd_AddCommand( "clear", Con_Clear_f, "clear console history" );
 	Cmd_AddCommand( "messagemode", Con_MessageMode_f, "enable message mode \"say\"" );
 	Cmd_AddCommand( "messagemode2", Con_MessageMode2_f, "enable message mode \"say_team\"" );
 
@@ -941,7 +951,7 @@ Con_NPrint
 Draw a single debug line with specified height
 ================
 */
-void Con_NPrintf( int idx, char *fmt, ... )
+void GAME_EXPORT Con_NPrintf( int idx, char *fmt, ... )
 {
 	va_list	args;
 
@@ -968,7 +978,7 @@ Con_NXPrint
 Draw a single debug line with specified height, color and time to live
 ================
 */
-void Con_NXPrintf( con_nprint_t *info, char *fmt, ... )
+void GAME_EXPORT Con_NXPrintf( con_nprint_t *info, char *fmt, ... )
 {
 	va_list	args;
 
@@ -1696,12 +1706,12 @@ void Con_DrawSolidConsole( float frac, qboolean fill )
 			if( con_black->integer )
 			{
 				pglColor4ub( 0, 0, 0, 255 );
-				R_DrawStretchPic( 0, y - scr_width->integer * 3 / 4, scr_width->integer, scr_width->integer * 3 / 4, 0, 0, 1, 1, cls.fillImage );
+				R_DrawStretchPic( 0, y - scr_width->value * 3 / 4, scr_width->value, scr_width->value * 3 / 4, 0, 0, 1, 1, cls.fillImage );
 			}
 			else
 			{
 				pglColor4ub( 255, 255, 255, 255 );
-				R_DrawStretchPic( 0, y - scr_width->integer * 3 / 4, scr_width->integer, scr_width->integer * 3 / 4, 0, 0, 1, 1, con.background );
+				R_DrawStretchPic( 0, y - scr_width->value * 3 / 4, scr_width->value, scr_width->value * 3 / 4, 0, 0, 1, 1, con.background );
 			}
 		}
 		else
@@ -1710,12 +1720,12 @@ void Con_DrawSolidConsole( float frac, qboolean fill )
 			if( con_black->value )
 			{
 				pglColor4ub( 0, 0, 0, 255 * con_alpha->value );
-				R_DrawStretchPic( 0, y - scr_width->integer * 3 / 4, scr_width->integer, scr_width->integer * 3 / 4, 0, 0, 1, 1, cls.fillImage );
+				R_DrawStretchPic( 0, y - scr_width->value * 3 / 4, scr_width->value, scr_width->value * 3 / 4, 0, 0, 1, 1, cls.fillImage );
 			}
 			else
 			{
 				pglColor4ub( 255, 255, 255, 255 * con_alpha->value );
-				R_DrawStretchPic( 0, y - scr_width->integer * 3 / 4, scr_width->integer, scr_width->integer * 3 / 4, 0, 0, 1, 1, con.background );
+				R_DrawStretchPic( 0, y - scr_width->value * 3 / 4, scr_width->value, scr_width->value * 3 / 4, 0, 0, 1, 1, con.background );
 			}
 		}
 		pglColor4ub( 255, 255, 255, 255 );
@@ -1732,17 +1742,18 @@ void Con_DrawSolidConsole( float frac, qboolean fill )
 		byte	*color = g_color_table[7];
 		int	stringLen, width = 0, charH;
 
-		Q_snprintf( curbuild, MAX_STRING, "Xash3D FWGS %i/%s build %i (based on %g build%i)",
-					PROTOCOL_VERSION,
-					XASH_VERSION, Q_buildnum( ), // fork info
-					BASED_VERSION, Q_buildnum_compat( )); // original xash3d info
+		Q_snprintf( curbuild, MAX_STRING, "Xash3D FWGS %i/%s build %i %s %s-%s", PROTOCOL_VERSION,
+					XASH_VERSION, Q_buildnum( ), Q_buildcommit( ), Q_buildos( ), Q_buildarch( ) );
 		Con_DrawStringLen( curbuild, &stringLen, &charH );
 		start = scr_width->integer - stringLen;
 		stringLen = Con_StringLength( curbuild );
 
 		for( i = 0; i < stringLen; i++ )
 			width += Con_DrawCharacter( start + width, 0, curbuild[i], color );
+
+		host.force_draw_version_time = 0;
 	}
+
 
 	// draw the text
 	con.vislines = lines;
@@ -1898,14 +1909,17 @@ void Con_DrawVersion( void )
 		if(( cls.key_dest != key_menu && !draw_version ) || gl_overview->integer == 2 )
 			return;
 	}
+	else
+	{
+		if( host.realtime > host.force_draw_version_time )
+			host.force_draw_version = false;
+	}
 
 	if( host.force_draw_version || draw_version )
-		Q_snprintf( curbuild, MAX_STRING, "Xash3D SDL %i/%s build %i (based on %g build%i)", PROTOCOL_VERSION,
-					XASH_VERSION, Q_buildnum( ),
-					BASED_VERSION, Q_buildnum_compat( ));
-	else Q_snprintf( curbuild, MAX_STRING, "v%i/%s build %i (based on %g build%i)", PROTOCOL_VERSION,
-					 XASH_VERSION, Q_buildnum( ),
-					 BASED_VERSION, Q_buildnum_compat( ));
+		Q_snprintf( curbuild, MAX_STRING, "Xash3D FWGS %i/%s build %i %s %s-%s", PROTOCOL_VERSION,
+					XASH_VERSION, Q_buildnum( ), Q_buildcommit( ), Q_buildos( ), Q_buildarch( ) );
+	else Q_snprintf( curbuild, MAX_STRING, "v%i/%s build %i %s %s-%s", PROTOCOL_VERSION,
+					 XASH_VERSION, Q_buildnum( ), Q_buildcommit( ), Q_buildos( ), Q_buildarch( ));
 	Con_DrawStringLen( curbuild, &stringLen, &charH );
 	start = scr_width->integer - stringLen * 1.05f;
 	stringLen = Con_StringLength( curbuild );
@@ -1951,7 +1965,7 @@ void Con_RunConsole( void )
 			con.displayFrac = con.finalFrac;
 	}
 
-	if( con_charset->modified )
+	if( con_charset->modified || con_fontscale->modified || con_fontnum->modified )
 	{
 		// update codepage parameters
 		g_codepage = 0;
@@ -1965,7 +1979,7 @@ void Con_RunConsole( void )
 		Con_LoadConchars();
 		cls.creditsFont.valid = false;
 		SCR_LoadCreditsFont();
-		con_charset->modified = false;
+		con_charset->modified = con_fontscale->modified = con_fontnum->modified = false;
 	}
 }
 

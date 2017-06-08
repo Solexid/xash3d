@@ -100,6 +100,138 @@ byte	*net_mempool;
 byte	net_message_buffer[NET_MAX_PAYLOAD];
 
 /*
+=================================
+
+NETWORK PACKET SPLIT
+
+=================================
+*/
+
+/*
+======================
+NetSplit_GetLong
+
+Collect fragmrnts with signature 0xFFFFFFFE to single packet
+return true when got full packet
+======================
+*/
+qboolean NetSplit_GetLong( netsplit_t *ns, netadr_t *from, byte *data, size_t *length, qboolean decompress )
+{
+	netsplit_packet_t *packet = (netsplit_packet_t*)data;
+	netsplit_chain_packet_t * p;
+
+	//ASSERT( *length > NETSPLIT_HEADER_SIZE );
+	if( *length <= NETSPLIT_HEADER_SIZE ) return false;
+
+	p = &ns->packets[packet->id & NETSPLIT_BACKUP_MASK];
+	// MsgDev( D_NOTE, "NetSplit_GetLong: packet from %s, id %d, index %d length %d\n", NET_AdrToString( *from ), (int)packet->id, (int)packet->index, (int)*length );
+
+	// no packets with this id received
+	if( packet->id != p->id )
+	{
+		// warn if previous packet not received
+		if( p->received < p->count )
+			MsgDev( D_WARN, "NetSplit_GetLong: lost packet %d\n", p->id );
+
+		p->id = packet->id;
+		p->count = packet->count;
+		p->received = 0;
+		Q_memset( p->recieved_v, 0, 32 );
+	}
+
+	// use bool vector to detect dup packets
+	if( p->recieved_v[packet->index >> 5 ] & ( 1 << ( packet->index & 31 ) ) )
+	{
+		MsgDev( D_WARN, "NetSplit_GetLong: dup packet from %s\n", NET_AdrToString( *from ) );
+		return false;
+	}
+
+	p->received++;
+
+	// mark as received
+	p->recieved_v[packet->index >> 5] |= 1 << ( packet->index & 31 );
+
+	// prevent overflow
+	if( packet->part * packet->index > NET_MAX_PAYLOAD )
+	{
+		MsgDev( D_WARN, "NetSplit_GetLong: packet out fo bounds from %s (part %d index %d)\n", NET_AdrToString( *from ), packet->part, packet->index );
+		return false;
+	}
+
+	if( packet->length > NET_MAX_PAYLOAD )
+	{
+		MsgDev( D_WARN, "NetSplit_GetLong: packet out fo bounds from %s (length %d)\n", NET_AdrToString( *from ), packet->length );
+		return false;
+	}
+
+	Q_memcpy( p->data + packet->part * packet->index, packet->data, *length - 18 );
+
+	// rewrite results of NET_GetPacket
+	if( p->received == packet->count )
+	{
+		//ASSERT( packet->length % packet->part == (*length - NETSPLIT_HEADER_SIZE) % packet->part );
+		size_t len = packet->length;
+
+		ns->total_received += len;
+
+		if( decompress )
+			Huff_DecompressData( p->data, &len );
+
+		ns->total_received_uncompressed += len;
+		*length = len;
+
+		// MsgDev( D_NOTE, "NetSplit_GetLong: packet from %s, id %d received %d length %d\n", NET_AdrToString( *from ), (int)packet->id, (int)p->received, (int)packet->length );
+		Q_memcpy( data, p->data, len );
+		return true;
+	}
+	else
+		*length = NETSPLIT_HEADER_SIZE + packet->part;
+
+
+	return false;
+}
+
+/*
+======================
+NetSplit_SendLong
+
+Send parts that are less or equal maxpacket
+======================
+*/
+void NetSplit_SendLong( netsrc_t sock, size_t length, void *data, netadr_t to, unsigned int maxpacket, unsigned int id, qboolean compress )
+{
+	netsplit_packet_t packet = {0};
+	unsigned int part = maxpacket - NETSPLIT_HEADER_SIZE;
+
+	if( compress )
+		Huff_CompressData( data, &length );
+
+	packet.signature = 0xFFFFFFFE;
+	packet.id = id;
+	packet.length = length;
+	packet.part = part;
+	packet.count = ( length - 1 ) / part + 1;
+
+	//MsgDev( D_NOTE, "NetSplit_SendLong: packet to %s, count %d, length %d\n", NET_AdrToString( to ), (int)packet.count, (int)packet.length );
+
+	while( packet.index < packet.count  )
+	{
+		unsigned int size = part;
+
+		if( size > length )
+			size = length;
+
+		length -= size;
+
+		Q_memcpy( packet.data, (const byte*)data + packet.index * part, size );
+		//MsgDev( D_NOTE, "NetSplit_SendLong: packet to %s, id %d, index %d\n", NET_AdrToString( to ), (int)packet.id, (int)packet.index );
+		NET_SendPacket( sock, size + NETSPLIT_HEADER_SIZE, &packet, to );
+		packet.index++;
+	}
+
+}
+
+/*
 ===============
 Netchan_Init
 ===============
@@ -1429,7 +1561,12 @@ void Netchan_TransmitBits( netchan_t *chan, int length, byte *data )
 	// send the datagram
 	if( !CL_IsPlaybackDemo( ))
 	{
-		NET_SendPacket( chan->sock, BF_GetNumBytesWritten( &send ), BF_GetData( &send ), chan->remote_address );
+		unsigned int size = BF_GetNumBytesWritten( &send );
+
+		if( chan->split && size > chan->maxpacket )
+			NetSplit_SendLong( chan->sock, size, BF_GetData( &send ), chan->remote_address, chan->maxpacket, chan->splitid++, chan->splitcompress );
+		else
+			NET_SendPacket( chan->sock, size, BF_GetData( &send ), chan->remote_address );
 	}
 
 	if( chan->rate == 0)

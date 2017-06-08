@@ -419,7 +419,8 @@ void SV_EmitPings( sizebuf_t *msg )
 		if( cl->state != cs_spawned )
 			continue;
 
-		SV_GetPlayerStats( cl, &ping, &packet_loss );
+		ping = cl->ping;
+		packet_loss = cl->packet_loss;
 
 		// there are 25 bits for each client
 		BF_WriteOneBit( msg, 1 );
@@ -454,7 +455,7 @@ void SV_WriteClientdataToMessage( sv_client_t *cl, sizebuf_t *msg )
 	frame = &cl->frames[cl->netchan.outgoing_sequence & SV_UPDATE_MASK];
 
 	frame->senttime = host.realtime;
-	frame->raw_ping = -1.0f;
+	frame->ping_time = -1.0f;
 	frame->latency = -1.0f;
 
 	if( cl->chokecount != 0 )
@@ -678,7 +679,7 @@ void SV_UpdateToReliableMessages( void )
 		{
 			cl->sendmovevars = false;
 			SV_FullUpdateMovevars( cl, &cl->netchan.message );
-                    }
+		}
 	}
 
 	// 1% chanse for simulate random network bugs

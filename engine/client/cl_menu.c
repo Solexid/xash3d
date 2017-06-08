@@ -21,7 +21,7 @@ GNU General Public License for more details.
 #include "gl_local.h"
 #include "library.h"
 #include "input.h"
-#include "events.h"
+#include "server.h" // !!svgame.hInstance
 
 static MENUAPI	GetMenuAPI;
 static ADDTOUCHBUTTONTOLIST pfnAddTouchButtonToList;
@@ -130,7 +130,6 @@ qboolean UI_IsVisible( void )
 
 static void UI_DrawLogo( const char *filename, float x, float y, float width, float height )
 {
-#ifdef USE_VFW
 	static float	cin_time;
 	static int	last_frame = -1;
 	byte		*cin_data = NULL;
@@ -196,7 +195,6 @@ static void UI_DrawLogo( const char *filename, float x, float y, float width, fl
 	}
 
 	R_DrawStretchRaw( x, y, width, height, menu.logo_xres, menu.logo_yres, cin_data, redraw );
-#endif
 }
 
 static int UI_GetLogoWidth( void )
@@ -844,11 +842,19 @@ int pfnCheckGameDll( void )
 {
 	void	*hInst;
 
-	if( SV_Active( ) )
+#if TARGET_OS_IPHONE
+	// loading server library drains too many ram
+	// so 512MB iPod Touch cannot even connect to
+	// to servers in cstrike
+	return true;
+#endif
+
+	if( svgame.hInstance )
 		return true;
 
 	if( Cvar_VariableInteger("xashds_hacks") )
 		return true;
+
 	Com_ResetLibraryError();
 	if(( hInst = Com_LoadLibrary( SI.gamedll, true )) != NULL )
 	{
@@ -1030,7 +1036,10 @@ qboolean UI_LoadProgs( void )
 
 	// setup globals
 	menu.globals = &gpGlobals;
-#if defined (__ANDROID__)
+#if TARGET_OS_IPHONE || defined __EMSCRIPTEN__
+	if(!( menu.hInstance = Com_LoadLibrary( "menu", false )))
+		return false;
+#elif defined (__ANDROID__)
 	char menulib[256];
 	Q_snprintf( menulib, 256, "%s/%s", getenv("XASH3D_GAMELIBDIR"), MENUDLL );
 	if(!( menu.hInstance = Com_LoadLibrary( menulib, false )))

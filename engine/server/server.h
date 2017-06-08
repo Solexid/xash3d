@@ -34,6 +34,9 @@ GNU General Public License for more details.
 #define SV_UPDATE_MASK	(SV_UPDATE_BACKUP - 1)
 extern int SV_UPDATE_BACKUP;
 
+#define MAX_LOCALINFO 4096
+extern char localinfo[MAX_LOCALINFO];
+
 // hostflags
 #define SVF_SKIPLOCALHOST	BIT( 0 )
 #define SVF_PLAYERSONLY	BIT( 1 )
@@ -179,12 +182,11 @@ typedef struct server_s
 typedef struct
 {
 	double		senttime;
-	float		raw_ping;
+	float		ping_time;
 	float		latency;
 
 	clientdata_t	clientdata;
-	weapon_data_t	weapondata[MAX_WEAPONS];
-	weapon_data_t	oldweapondata[MAX_WEAPONS];	// g-cont. The fucking Cry Of Fear a does corrupting memory after the weapondata!!!
+	weapon_data_t	weapondata[64];
 
 	int  		num_entities;
 	int  		first_entity;		// into the circular sv_packet_entities[]
@@ -203,7 +205,8 @@ typedef struct sv_client_s
 
 	qboolean		local_weapons;		// enable weapon predicting
 	qboolean		lag_compensation;		// enable lag compensation
-	qboolean		hltv_proxy;		// this is spectator proxy (hltv)		
+	qboolean		hltv_proxy;		// this is spectator proxy (hltv)
+	qboolean		hasusrmsgs;
 
 	netchan_t		netchan;
 	int		chokecount;         	// number of messages rate supressed
@@ -442,8 +445,7 @@ extern	convar_t		*sv_skyangle;
 extern	convar_t		*sv_quakehulls;
 extern	convar_t		*sv_validate_changelevel;
 extern	convar_t		*sv_downloadurl;
-extern	convar_t		*sv_clientclean;
-extern 	convar_t		*sv_skipshield; // HACK for shield
+extern 	convar_t		*sv_skipshield; // HACK for shield (cstrike)
 extern	convar_t		*sv_trace_messages;
 extern	convar_t		*mp_consistency;
 extern	convar_t		*public_server;
@@ -458,6 +460,10 @@ extern	convar_t		*sv_log_onefile;
 extern	convar_t		*mp_logecho;
 extern	convar_t		*mp_logfile;
 extern	convar_t		*sv_fixmulticast;
+extern	convar_t		*sv_allow_split;
+extern	convar_t		*sv_allow_compress;
+extern	convar_t		*sv_maxpacket;
+extern	convar_t		*sv_forcesimulating;
 
 //===========================================================
 //
@@ -482,6 +488,7 @@ void Master_Add( void );
 void Master_Heartbeat( void );
 void Master_Packet( void );
 void SV_AddToMaster( netadr_t from, sizebuf_t *msg );
+qboolean SV_ProcessUserAgent( netadr_t from, char *useragent );
 
 //
 // sv_init.c
@@ -536,6 +543,9 @@ void SV_TogglePause( const char *msg );
 void SV_PutClientInServer( edict_t *ent );
 qboolean SV_ShouldUpdatePing( sv_client_t *cl );
 const char *SV_GetClientIDString( sv_client_t *cl );
+sv_client_t *SV_ClientById( int id );
+sv_client_t *SV_ClientByName( const char *name );
+qboolean SV_SetCurrentClient( sv_client_t *cl );
 void SV_FullClientUpdate( sv_client_t *cl, sizebuf_t *msg );
 void SV_FullUpdateMovevars( sv_client_t *cl, sizebuf_t *msg );
 void SV_GetPlayerStats( sv_client_t *cl, int *ping, int *packet_loss );
@@ -551,6 +561,8 @@ void SV_InitClientMove( void );
 void SV_UpdateServerInfo( void );
 void SV_EndRedirect( void );
 void SV_RemoteCommand( netadr_t from, sizebuf_t *msg );
+int SV_CalcPing( sv_client_t *cl );
+
 //
 // sv_cmds.c
 //
@@ -604,6 +616,7 @@ sv_client_t *SV_ClientFromEdict( const edict_t *pEdict, qboolean spawned_only );
 void SV_SetClientMaxspeed( sv_client_t *cl, float fNewMaxspeed );
 int SV_MapIsValid( const char *filename, const char *spawn_entity, const char *landmark_name );
 void SV_StartSound( edict_t *ent, int chan, const char *sample, float vol, float attn, int flags, int pitch );
+void SV_StartSoundEx( edict_t *ent, int chan, const char *sample, float vol, float attn, int flags, int pitch, qboolean excludeSource );
 void SV_CreateStaticEntity( struct sizebuf_s *msg, sv_static_entity_t *ent );
 edict_t* pfnPEntityOfEntIndex( int iEntIndex );
 int pfnIndexOfEdict( const edict_t *pEdict );

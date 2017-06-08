@@ -204,7 +204,7 @@ R_WorldToScreen
 Convert a given point from world into screen space
 ===============
 */
-qboolean R_WorldToScreen( const vec3_t point, vec3_t screen )
+qboolean GAME_EXPORT R_WorldToScreen( const vec3_t point, vec3_t screen )
 {
 	matrix4x4	worldToScreen;
 	qboolean	behind;
@@ -242,7 +242,7 @@ R_ScreenToWorld
 Convert a given point from screen into world space
 ===============
 */
-void R_ScreenToWorld( const vec3_t screen, vec3_t point )
+void GAME_EXPORT R_ScreenToWorld( const vec3_t screen, vec3_t point )
 {
 	matrix4x4	screenToWorld;
 	float	w;
@@ -372,16 +372,16 @@ int R_ComputeFxBlend( cl_entity_t *e )
 		break;	
 	}
 
-	if( e->model->type != mod_brush )
+	if( e->model && e->model->type != mod_brush )
 	{
 		// NOTE: never pass sprites with rendercolor '0 0 0' it's a stupid Valve Hammer Editor bug
 		if( !e->curstate.rendercolor.r && !e->curstate.rendercolor.g && !e->curstate.rendercolor.b )
 			e->curstate.rendercolor.r = e->curstate.rendercolor.g = e->curstate.rendercolor.b = 255;
-	}
 
-	// apply scale to studiomodels and sprites only
-	if( e->model && e->model->type != mod_brush && !e->curstate.scale )
-		e->curstate.scale = 1.0f;
+		// apply scale to studiomodels and sprites only
+		if( !e->curstate.scale )
+			e->curstate.scale = 1.0f;
+	}
 
 	blend = bound( 0, blend, 255 );
 
@@ -1410,6 +1410,9 @@ static int GL_RenderGetParm( int parm, int arg )
 	case PARM_TEX_GLFORMAT:
 		glt = R_GetTexture( arg );
 		return glt->format;
+	case PARM_TEX_ENCODE:
+		glt = R_GetTexture( arg );
+		return glt->encode;
 	case PARM_TEX_SKYBOX:
 		ASSERT( arg >= 0 && arg < 6 );
 		return tr.skyboxTextures[arg];

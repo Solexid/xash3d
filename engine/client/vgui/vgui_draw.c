@@ -22,7 +22,7 @@ GNU General Public License for more details.
 #include "vgui_api.h"
 #include "library.h"
 #include <string.h>
-
+#include "../keydefs.h"
 
 int	g_textures[VGUI_MAX_TEXTURES];
 int	g_textureId = 0;
@@ -60,17 +60,17 @@ void VGUI_ShowCursor( void )
 	SDL_ShowCursor();
 }*/
 
-void *VGUI_EngineMalloc(size_t size)
+void GAME_EXPORT *VGUI_EngineMalloc(size_t size)
 {
 	return Z_Malloc( size );
 }
 
-qboolean VGUI_IsInGame()
+qboolean GAME_EXPORT VGUI_IsInGame( void )
 {
 	return cls.state == ca_active && cls.key_dest == key_game;
 }
 
-void VGUI_GetMousePos( int *x, int *y )
+void GAME_EXPORT VGUI_GetMousePos( int *x, int *y )
 {
 	CL_GetMousePosition( x, y );
 }
@@ -97,7 +97,7 @@ void VGUI_InitCursors( void )
 #endif
 }
 
-void VGUI_CursorSelect(enum VGUI_DefaultCursor cursor )
+void GAME_EXPORT VGUI_CursorSelect(enum VGUI_DefaultCursor cursor )
 {
 	qboolean oldstate = host.mouse_visible;
 	if( cls.key_dest != key_game || cl.refdef.paused )
@@ -130,14 +130,14 @@ void VGUI_CursorSelect(enum VGUI_DefaultCursor cursor )
 #endif
 }
 
-byte VGUI_GetColor( int i, int j)
+byte GAME_EXPORT VGUI_GetColor( int i, int j)
 {
 	return g_color_table[i][j];
 }
 
 // Define and initialize vgui API
 
-void VGUI_SetVisible ( qboolean state )
+void GAME_EXPORT VGUI_SetVisible ( qboolean state )
 {
 	host.input_enabled=state;
 	host.mouse_visible=state;
@@ -333,73 +333,75 @@ void VGUI_InitKeyTranslationTable( void )
 	s_pVirtualKeyTrans['Y'] = s_pVirtualKeyTrans['y'] = KEY_Y;
 	s_pVirtualKeyTrans['Z'] = s_pVirtualKeyTrans['z'] = KEY_Z;
 #ifdef XASH_SDL
-	s_pVirtualKeyTrans[SDLK_KP_0] = KEY_PAD_0;
-	s_pVirtualKeyTrans[SDLK_KP_1] = KEY_PAD_1;
-	s_pVirtualKeyTrans[SDLK_KP_2] = KEY_PAD_2;
-	s_pVirtualKeyTrans[SDLK_KP_3] = KEY_PAD_3;
-	s_pVirtualKeyTrans[SDLK_KP_4] = KEY_PAD_4;
-	s_pVirtualKeyTrans[SDLK_KP_5] = KEY_PAD_5;
-	s_pVirtualKeyTrans[SDLK_KP_6] = KEY_PAD_6;
-	s_pVirtualKeyTrans[SDLK_KP_7] = KEY_PAD_7;
-	s_pVirtualKeyTrans[SDLK_KP_8] = KEY_PAD_8;
-	s_pVirtualKeyTrans[SDLK_KP_9] = KEY_PAD_9;
-	s_pVirtualKeyTrans[SDLK_KP_DIVIDE]	= KEY_PAD_DIVIDE;
-	s_pVirtualKeyTrans[SDLK_KP_MULTIPLY] = KEY_PAD_MULTIPLY;
-	s_pVirtualKeyTrans[SDLK_KP_MINUS] = KEY_PAD_MINUS;
-	s_pVirtualKeyTrans[SDLK_KP_PLUS] = KEY_PAD_PLUS;
-	s_pVirtualKeyTrans[SDLK_KP_ENTER]	= KEY_PAD_ENTER;
-	s_pVirtualKeyTrans[SDLK_KP_DECIMAL] = KEY_PAD_DECIMAL;
-	s_pVirtualKeyTrans[SDLK_LEFTBRACKET] = KEY_LBRACKET;
-	s_pVirtualKeyTrans[SDLK_RIGHTBRACKET] = KEY_RBRACKET;
-	s_pVirtualKeyTrans[SDLK_SEMICOLON] = KEY_SEMICOLON;
-	s_pVirtualKeyTrans[SDLK_QUOTE] = KEY_APOSTROPHE;
-	s_pVirtualKeyTrans[SDLK_BACKQUOTE] = KEY_BACKQUOTE;
-	s_pVirtualKeyTrans[SDLK_COMMA] = KEY_COMMA;
-	s_pVirtualKeyTrans[SDLK_PERIOD] = KEY_PERIOD;
-	s_pVirtualKeyTrans[SDLK_SLASH] = KEY_SLASH;
-	s_pVirtualKeyTrans[SDLK_BACKSLASH] = KEY_BACKSLASH;
-	s_pVirtualKeyTrans[SDLK_MINUS] = KEY_MINUS;
-	s_pVirtualKeyTrans[SDLK_EQUALS] = KEY_EQUAL;
-	s_pVirtualKeyTrans[SDLK_RETURN]	= KEY_ENTER;
-	s_pVirtualKeyTrans[SDLK_SPACE] = KEY_SPACE;
-	s_pVirtualKeyTrans[SDLK_BACKSPACE] = KEY_BACKSPACE;
-	s_pVirtualKeyTrans[SDLK_TAB] = KEY_TAB;
-	s_pVirtualKeyTrans[SDLK_CAPSLOCK] = KEY_CAPSLOCK;
-	s_pVirtualKeyTrans[SDLK_NUMLOCKCLEAR] = KEY_NUMLOCK;
-	s_pVirtualKeyTrans[SDLK_ESCAPE]	= KEY_ESCAPE;
-	s_pVirtualKeyTrans[SDLK_SCROLLLOCK]	= KEY_SCROLLLOCK;
-	s_pVirtualKeyTrans[SDLK_INSERT]	= KEY_INSERT;
-	s_pVirtualKeyTrans[SDLK_DELETE]	= KEY_DELETE;
-	s_pVirtualKeyTrans[SDLK_HOME] = KEY_HOME;
-	s_pVirtualKeyTrans[SDLK_END] = KEY_END;
-	s_pVirtualKeyTrans[SDLK_PRIOR] = KEY_PAGEUP;
-	s_pVirtualKeyTrans[SDLK_PAGEDOWN] = KEY_PAGEDOWN;
-	s_pVirtualKeyTrans[SDLK_PAUSE] = KEY_BREAK;
-	s_pVirtualKeyTrans[SDLK_RSHIFT] = KEY_RSHIFT;
-	s_pVirtualKeyTrans[SDLK_LSHIFT] = KEY_LSHIFT;	// SHIFT -> left SHIFT
-	s_pVirtualKeyTrans[SDLK_RALT] = KEY_RALT;
-	s_pVirtualKeyTrans[SDLK_LALT] = KEY_LALT;		// ALT -> left ALT
-	s_pVirtualKeyTrans[SDLK_RCTRL] = KEY_RCONTROL;
-	s_pVirtualKeyTrans[SDLK_LCTRL] = KEY_LCONTROL;	// CTRL -> left CTRL
-	s_pVirtualKeyTrans[SDLK_APPLICATION] = KEY_LWIN;
-	s_pVirtualKeyTrans[SDLK_APPLICATION] = KEY_RWIN;
-	s_pVirtualKeyTrans[SDLK_APPLICATION] = KEY_APP;
-	s_pVirtualKeyTrans[SDLK_UP] = KEY_UP;
-	s_pVirtualKeyTrans[SDLK_LEFT] = KEY_LEFT;
-	s_pVirtualKeyTrans[SDLK_DOWN] = KEY_DOWN;
-	s_pVirtualKeyTrans[SDLK_RIGHT] = KEY_RIGHT;
-	s_pVirtualKeyTrans[SDLK_F1] = KEY_F1;
-	s_pVirtualKeyTrans[SDLK_F2] = KEY_F2;
-	s_pVirtualKeyTrans[SDLK_F3] = KEY_F3;
-	s_pVirtualKeyTrans[SDLK_F4] = KEY_F4;
-	s_pVirtualKeyTrans[SDLK_F5] = KEY_F5;
-	s_pVirtualKeyTrans[SDLK_F6] = KEY_F6;
-	s_pVirtualKeyTrans[SDLK_F7] = KEY_F7;
-	s_pVirtualKeyTrans[SDLK_F8] = KEY_F8;
-	s_pVirtualKeyTrans[SDLK_F9] = KEY_F9;
-	s_pVirtualKeyTrans[SDLK_F10] = KEY_F10;
-	s_pVirtualKeyTrans[SDLK_F11] = KEY_F11;
-	s_pVirtualKeyTrans[SDLK_F12] = KEY_F12;
+
+
+	s_pVirtualKeyTrans[K_KP_5 - 5] = KEY_PAD_0;
+	s_pVirtualKeyTrans[K_KP_5 - 4] = KEY_PAD_1;
+	s_pVirtualKeyTrans[K_KP_5 - 3] = KEY_PAD_2;
+	s_pVirtualKeyTrans[K_KP_5 - 2] = KEY_PAD_3;
+	s_pVirtualKeyTrans[K_KP_5 - 1] = KEY_PAD_4;
+	s_pVirtualKeyTrans[K_KP_5 - 0] = KEY_PAD_5;
+	s_pVirtualKeyTrans[K_KP_5 + 1] = KEY_PAD_6;
+	s_pVirtualKeyTrans[K_KP_5 + 2] = KEY_PAD_7;
+	s_pVirtualKeyTrans[K_KP_5 + 3] = KEY_PAD_8;
+	s_pVirtualKeyTrans[K_KP_5 + 4] = KEY_PAD_9;
+	s_pVirtualKeyTrans[K_KP_SLASH]	= KEY_PAD_DIVIDE;
+	s_pVirtualKeyTrans['*'] = KEY_PAD_MULTIPLY;
+	s_pVirtualKeyTrans[K_KP_MINUS] = KEY_PAD_MINUS;
+	s_pVirtualKeyTrans[K_KP_PLUS] = KEY_PAD_PLUS;
+	s_pVirtualKeyTrans[K_KP_ENTER]	= KEY_PAD_ENTER;
+	//s_pVirtualKeyTrans[K_KP_DECIMAL] = KEY_PAD_DECIMAL;
+	s_pVirtualKeyTrans['['] = KEY_LBRACKET;
+	s_pVirtualKeyTrans[']'] = KEY_RBRACKET;
+	s_pVirtualKeyTrans[';'] = KEY_SEMICOLON;
+	s_pVirtualKeyTrans['\''] = KEY_APOSTROPHE;
+	s_pVirtualKeyTrans['`'] = KEY_BACKQUOTE;
+	s_pVirtualKeyTrans[','] = KEY_COMMA;
+	s_pVirtualKeyTrans['.'] = KEY_PERIOD;
+	s_pVirtualKeyTrans[K_KP_SLASH] = KEY_SLASH;
+	s_pVirtualKeyTrans['\\'] = KEY_BACKSLASH;
+	s_pVirtualKeyTrans['-'] = KEY_MINUS;
+	s_pVirtualKeyTrans['='] = KEY_EQUAL;
+	s_pVirtualKeyTrans[K_ENTER]	= KEY_ENTER;
+	s_pVirtualKeyTrans[K_SPACE] = KEY_SPACE;
+	s_pVirtualKeyTrans[K_BACKSPACE] = KEY_BACKSPACE;
+	s_pVirtualKeyTrans[K_TAB] = KEY_TAB;
+	s_pVirtualKeyTrans[K_CAPSLOCK] = KEY_CAPSLOCK;
+	s_pVirtualKeyTrans[K_KP_NUMLOCK] = KEY_NUMLOCK;
+	s_pVirtualKeyTrans[K_ESCAPE]	= KEY_ESCAPE;
+	//s_pVirtualKeyTrans[K_KP_SCROLLLOCK]	= KEY_SCROLLLOCK;
+	s_pVirtualKeyTrans[K_INS]	= KEY_INSERT;
+	s_pVirtualKeyTrans[K_DEL]	= KEY_DELETE;
+	s_pVirtualKeyTrans[K_HOME] = KEY_HOME;
+	s_pVirtualKeyTrans[K_END] = KEY_END;
+	s_pVirtualKeyTrans[K_PGUP] = KEY_PAGEUP;
+	s_pVirtualKeyTrans[K_PGDN] = KEY_PAGEDOWN;
+	s_pVirtualKeyTrans[K_PAUSE] = KEY_BREAK;
+	//s_pVirtualKeyTrans[K_SHIFT] = KEY_RSHIFT;
+	s_pVirtualKeyTrans[K_SHIFT] = KEY_LSHIFT;	// SHIFT -> left SHIFT
+	//s_pVirtualKeyTrans[SDLK_RALT] = KEY_RALT;
+	s_pVirtualKeyTrans[K_ALT] = KEY_LALT;		// ALT -> left ALT
+	//s_pVirtualKeyTrans[SDLK_RCTRL] = KEY_RCONTROL;
+	s_pVirtualKeyTrans[K_CTRL] = KEY_LCONTROL;	// CTRL -> left CTRL
+	s_pVirtualKeyTrans[K_WIN] = KEY_LWIN;
+	//s_pVirtualKeyTrans[SDLK_APPLICATION] = KEY_RWIN;
+	//s_pVirtualKeyTrans[K_WIN] = KEY_APP;
+	s_pVirtualKeyTrans[K_UPARROW] = KEY_UP;
+	s_pVirtualKeyTrans[K_LEFTARROW] = KEY_LEFT;
+	s_pVirtualKeyTrans[K_DOWNARROW] = KEY_DOWN;
+	s_pVirtualKeyTrans[K_RIGHTARROW] = KEY_RIGHT;
+	s_pVirtualKeyTrans[K_F1] = KEY_F1;
+	s_pVirtualKeyTrans[K_F2] = KEY_F2;
+	s_pVirtualKeyTrans[K_F3] = KEY_F3;
+	s_pVirtualKeyTrans[K_F4] = KEY_F4;
+	s_pVirtualKeyTrans[K_F5] = KEY_F5;
+	s_pVirtualKeyTrans[K_F6] = KEY_F6;
+	s_pVirtualKeyTrans[K_F7] = KEY_F7;
+	s_pVirtualKeyTrans[K_F8] = KEY_F8;
+	s_pVirtualKeyTrans[K_F9] = KEY_F9;
+	s_pVirtualKeyTrans[K_F10] = KEY_F10;
+	s_pVirtualKeyTrans[K_F11] = KEY_F11;
+	s_pVirtualKeyTrans[K_F12] = KEY_F12;
 #endif
 }
 
@@ -495,7 +497,7 @@ VGUI_DrawInit
 Startup VGUI backend
 ================
 */
-void VGUI_DrawInit( void )
+void GAME_EXPORT VGUI_DrawInit( void )
 {
 	Q_memset( g_textures, 0, sizeof( g_textures ));
 	g_textureId = g_iBoundTexture = 0;
@@ -508,7 +510,7 @@ VGUI_DrawShutdown
 Release all textures
 ================
 */
-void VGUI_DrawShutdown( void )
+void GAME_EXPORT VGUI_DrawShutdown( void )
 {
 	int	i;
 
@@ -525,7 +527,7 @@ VGUI_GenerateTexture
 generate unique texture number
 ================
 */
-int VGUI_GenerateTexture( void )
+int GAME_EXPORT VGUI_GenerateTexture( void )
 {
 	if( ++g_textureId >= VGUI_MAX_TEXTURES )
 		Sys_Error( "VGUI_GenerateTexture: VGUI_MAX_TEXTURES limit exceeded\n" );
@@ -539,7 +541,7 @@ VGUI_UploadTexture
 Upload texture into video memory
 ================
 */
-void VGUI_UploadTexture( int id, const char *buffer, int width, int height )
+void GAME_EXPORT VGUI_UploadTexture( int id, const char *buffer, int width, int height )
 {
 	rgbdata_t	r_image;
 	char	texName[32];
@@ -572,7 +574,7 @@ VGUI_CreateTexture
 Create empty rgba texture and upload them into video memory
 ================
 */
-void VGUI_CreateTexture( int id, int width, int height )
+void GAME_EXPORT VGUI_CreateTexture( int id, int width, int height )
 {
 	rgbdata_t	r_image;
 	char	texName[32];
@@ -598,7 +600,7 @@ void VGUI_CreateTexture( int id, int width, int height )
 	g_iBoundTexture = id;
 }
 
-void VGUI_UploadTextureBlock( int id, int drawX, int drawY, const byte *rgba, int blockWidth, int blockHeight )
+void GAME_EXPORT VGUI_UploadTextureBlock( int id, int drawX, int drawY, const byte *rgba, int blockWidth, int blockHeight )
 {
 	if( id <= 0 || id >= VGUI_MAX_TEXTURES || g_textures[id] == 0 || g_textures[id] == cls.fillImage )
 	{
@@ -610,7 +612,7 @@ void VGUI_UploadTextureBlock( int id, int drawX, int drawY, const byte *rgba, in
 	g_iBoundTexture = id;
 }
 
-void VGUI_SetupDrawingRect( int *pColor )
+void GAME_EXPORT VGUI_SetupDrawingRect( int *pColor )
 {
 	pglEnable( GL_BLEND );
 	pglDisable( GL_ALPHA_TEST );
@@ -618,7 +620,7 @@ void VGUI_SetupDrawingRect( int *pColor )
 	pglColor4ub( pColor[0], pColor[1], pColor[2], 255 - pColor[3] );
 }
 
-void VGUI_SetupDrawingText( int *pColor )
+void GAME_EXPORT VGUI_SetupDrawingText( int *pColor )
 {
 	pglEnable( GL_BLEND );
 	pglEnable( GL_ALPHA_TEST );
@@ -628,7 +630,7 @@ void VGUI_SetupDrawingText( int *pColor )
 	pglColor4ub( pColor[0], pColor[1], pColor[2], 255 - pColor[3] );
 }
 
-void VGUI_SetupDrawingImage( int *pColor )
+void GAME_EXPORT VGUI_SetupDrawingImage( int *pColor )
 {
 	pglEnable( GL_BLEND );
 	pglEnable( GL_ALPHA_TEST );
@@ -638,7 +640,7 @@ void VGUI_SetupDrawingImage( int *pColor )
 	pglColor4ub( pColor[0], pColor[1], pColor[2], 255 - pColor[3] );
 }
 
-void VGUI_BindTexture( int id )
+void GAME_EXPORT VGUI_BindTexture( int id )
 {
 	if( id > 0 && id < VGUI_MAX_TEXTURES && g_textures[id] )
 	{
@@ -660,7 +662,7 @@ VGUI_GetTextureSizes
 returns wide and tall for currently binded texture
 ================
 */
-void VGUI_GetTextureSizes( int *width, int *height )
+void GAME_EXPORT VGUI_GetTextureSizes( int *width, int *height )
 {
 	gltexture_t	*glt;
 	int		texnum;
@@ -681,7 +683,7 @@ VGUI_EnableTexture
 disable texturemode for fill rectangle
 ================
 */
-void VGUI_EnableTexture( qboolean enable )
+void GAME_EXPORT VGUI_EnableTexture( qboolean enable )
 {
 	if( enable ) pglEnable( GL_TEXTURE_2D );
 	else pglDisable( GL_TEXTURE_2D );
@@ -694,7 +696,7 @@ VGUI_DrawQuad
 generic method to fill rectangle
 ================
 */
-void VGUI_DrawQuad( const vpoint_t *ul, const vpoint_t *lr )
+void GAME_EXPORT VGUI_DrawQuad( const vpoint_t *ul, const vpoint_t *lr )
 {
 	ASSERT( ul != NULL && lr != NULL );
 
@@ -719,7 +721,7 @@ void VGui_Paint()
 		vgui.Paint();
 }
 
-void *VGui_GetPanel()
+void *GAME_EXPORT VGui_GetPanel()
 {
 	if( vgui.initialized )
 		return vgui.GetPanel();

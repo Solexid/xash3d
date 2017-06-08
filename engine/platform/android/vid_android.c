@@ -1,5 +1,5 @@
 /*
-gl_vid_android.c - nanogl video backend
+gl_vid_android.c - Android video backend
 Copyright (C) 2016 mittorn
 
 This program is free software: you can redistribute it and/or modify
@@ -13,16 +13,16 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#ifndef XASH_DEDICATED
-#if defined(XASH_NANOGL) && defined(XASH_SDL)
 
 #include "common.h"
+#if XASH_VIDEO == VIDEO_ANDROID
 #include "client.h"
 #include "gl_local.h"
 #include "mod_local.h"
 #include "input.h"
 #include <GL/nanogl.h>
 #include "gl_vidnt.h"
+#include "filesystem.h"
 
 
 
@@ -341,13 +341,7 @@ GL_GetProcAddress
 */
 void *GL_GetProcAddress( const char *name )
 {
-#ifdef XASH_SDL
-	void *func = SDL_GL_GetProcAddress(name);
-#elif defined (XASH_GLES)
 	void *func = nanoGL_GetProcAddress(name);
-#else //No opengl implementation
-	void *func = NULL;
-#endif
 	if(!func)
 	{
 		MsgDev(D_ERROR, "Error: GL_GetProcAddress failed for %s", name);
@@ -359,7 +353,7 @@ void *GL_GetProcAddress( const char *name )
 void GL_InitExtensions( void )
 {
 	// initialize gl extensions
-	GL_CheckExtension( "OpenGL 1.1.0", opengl_110funcs, NULL, GL_OPENGL_110 );
+	GL_CheckExtension( "OpenGL 1.1.0", (void*)opengl_110funcs, NULL, GL_OPENGL_110 );
 
 	// get our various GL strings
 	glConfig.vendor_string = pglGetString( GL_VENDOR );
@@ -500,10 +494,7 @@ void GL_UpdateSwapInterval( void )
 	if( gl_swapInterval->modified )
 	{
 		gl_swapInterval->modified = false;
-#ifdef XASH_SDL
-		if( SDL_GL_SetSwapInterval(gl_swapInterval->integer) )
-			MsgDev(D_ERROR, "SDL_GL_SetSwapInterval: %s\n", SDL_GetError());
-#endif
+		Android_SwapInterval( gl_swapInterval->integer );
 	}
 }
 
@@ -514,9 +505,7 @@ GL_ContextError
 */
 static void GL_ContextError( void )
 {
-#ifdef XASH_SDL
-	MsgDev( D_ERROR, "GL_ContextError: %s\n", SDL_GetError() );
-#endif
+
 }
 
 /*
@@ -526,46 +515,7 @@ GL_SetupAttributes
 */
 void GL_SetupAttributes()
 {
-#ifdef XASH_SDL
-	int samples;
 
-	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
-
-	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
-
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-
-	switch( gl_msaa->integer )
-	{
-	case 2:
-	case 4:
-	case 8:
-	case 16:
-		samples = gl_msaa->integer;
-		break;
-	default:
-		samples = 0; // don't use, because invalid parameter is passed
-	}
-
-	if( samples )
-	{
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, samples);
-	}
-	else
-	{
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
-	}
-#endif // XASH_SDL
 }
 
 /*
@@ -576,15 +526,6 @@ GL_CreateContext
 qboolean GL_CreateContext( void )
 {
 	nanoGL_Init();
-	/*if( !Sys_CheckParm( "-gldebug" ) || host.developer < 1 ) // debug bit the kills perfomance
-		return true;*/
-#ifdef XASH_SDL
-	if( ( glw_state.context = SDL_GL_CreateContext( host.hWnd ) ) == NULL)
-	{
-		MsgDev(D_ERROR, "GL_CreateContext: %s\n", SDL_GetError());
-		return GL_DeleteContext();
-	}
-#endif
 	return true;
 }
 
@@ -595,13 +536,6 @@ GL_UpdateContext
 */
 qboolean GL_UpdateContext( void )
 {
-#ifdef XASH_SDL
-	if(!( SDL_GL_MakeCurrent( host.hWnd, glw_state.context ) ) )
-	{
-		MsgDev(D_ERROR, "GL_UpdateContext: %s", SDL_GetError());
-		return GL_DeleteContext();
-	}
-#endif
 	return true;
 }
 
@@ -612,11 +546,13 @@ GL_DeleteContext
 */
 qboolean GL_DeleteContext( void )
 {
-#ifdef XASH_SDL
-	if( glw_state.context )
-		SDL_GL_DeleteContext(glw_state.context);
+#if 0 // unsure, need testing
+	MsgDev( D_NOTE, "nanoGL_Destroy( );");
+	nanoGL_Destroy();
+
+	MsgDev( D_NOTE, "Android_ShutdownGL( );");
+	Android_ShutdownGL();
 #endif
-	glw_state.context = NULL;
 
 	return false;
 }
@@ -646,99 +582,15 @@ void VID_StartupGamma( void )
 
 void VID_RestoreGamma( void )
 {
-	// no hardware gamma
 }
 
 qboolean VID_CreateWindow( int width, int height, qboolean fullscreen )
 {
-#ifdef XASH_SDL
-	static string	wndname;
-	Uint32 wndFlags = SDL_WINDOW_MOUSE_FOCUS | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
-
-	Q_strncpy( wndname, GI->title, sizeof( wndname ));
-
-	host.hWnd = SDL_CreateWindow(wndname, r_xpos->integer,
-		r_ypos->integer, width, height, wndFlags);
-
-	if( !host.hWnd )
-	{
-		MsgDev( D_ERROR, "VID_CreateWindow: couldn't create '%s': %s\n", wndname, SDL_GetError());
-
-		// remove MSAA, if it present, because
-		// window creating may fail on GLX visual choose
-		if( gl_msaa->integer )
-		{
-			Cvar_Set("gl_msaa", "0");
-			GL_SetupAttributes(); // re-choose attributes
-
-			// try again
-			return VID_CreateWindow( width, height, fullscreen );
-		}
-		return false;
-	}
-
-	if( fullscreen )
-	{
-		SDL_DisplayMode want, got;
-
-		want.w = width;
-		want.h = height;
-		want.driverdata = NULL;
-		want.format = want.refresh_rate = 0; // don't care
-
-		if( !SDL_GetClosestDisplayMode(0, &want, &got) )
-			return false;
-
-		MsgDev(D_NOTE, "Got closest display mode: %ix%i@%i\n", got.w, got.h, got.refresh_rate);
-
-		if( SDL_SetWindowDisplayMode(host.hWnd, &got) == -1 )
-			return false;
-
-		if( SDL_SetWindowFullscreen(host.hWnd, SDL_WINDOW_FULLSCREEN) == -1 )
-			return false;
-
-	}
-
-	host.window_center_x = width / 2;
-	host.window_center_y = height / 2;
-	SDL_ShowWindow( host.hWnd );
-#else
-	host.hWnd = 1; //fake window
-	host.window_center_x = width / 2;
-	host.window_center_y = height / 2;
-#endif
-	if( !glw_state.initialized )
-	{
-		if( !GL_CreateContext( ) )
-		{
-			return false;
-		}
-
-		VID_StartupGamma();
-	}
-	else
-	{
-		if( !GL_UpdateContext( ))
-			return false;
-	}
 	return true;
 }
 
 void VID_DestroyWindow( void )
 {
-#ifdef XASH_SDL
-	if( glw_state.context )
-	{
-		SDL_GL_DeleteContext( glw_state.context );
-		glw_state.context = NULL;
-	}
-
-	if( host.hWnd )
-	{
-		SDL_DestroyWindow ( host.hWnd );
-		host.hWnd = NULL;
-	}
-#endif
 	if( glState.fullScreen )
 	{
 		glState.fullScreen = false;
@@ -757,9 +609,12 @@ void R_ChangeDisplaySettingsFast( int width, int height )
 	//Cvar_SetFloat("vid_mode", VID_NOMODE);
 	Cvar_SetFloat("width", width);
 	Cvar_SetFloat("height", height);
+	MsgDev( D_NOTE, "R_ChangeDisplaySettingsFast(%d, %d)\n", width, height);
 
 	glState.width = width;
 	glState.height = height;
+	host.window_center_x = width / 2;
+	host.window_center_y = height / 2;
 
 	glState.wideScreen = true; // V_AdjustFov will check for widescreen
 
@@ -769,69 +624,27 @@ void R_ChangeDisplaySettingsFast( int width, int height )
 
 rserr_t R_ChangeDisplaySettings( int width, int height, qboolean fullscreen )
 {
-#ifdef XASH_SDL
-	SDL_DisplayMode displayMode;
-
-	SDL_GetCurrentDisplayMode(0, &displayMode);
-#ifdef __ANDROID__
-	width = displayMode.w;
-	height = displayMode.h;
-	fullscreen = false;
-#endif
+	Android_GetScreenRes(&width, &height);
 	R_SaveVideoMode( width, height );
 
-	// check our desktop attributes
-	glw_state.desktopBitsPixel = SDL_BITSPERPIXEL(displayMode.format);
-	glw_state.desktopWidth = displayMode.w;
-	glw_state.desktopHeight = displayMode.h;
-
-	glState.fullScreen = fullscreen;
+	host.window_center_x = width / 2;
+	host.window_center_y = height / 2;
+	
 	glState.wideScreen = true; // V_AdjustFov will check for widescreen
 
-	if(!host.hWnd)
-	{
-		if( !VID_CreateWindow( width, height, fullscreen ) )
-			return rserr_invalid_mode;
-	}
-#ifndef __ANDROID__
-else if( fullscreen )
-	{
-		SDL_DisplayMode want, got;
-
-		want.w = width;
-		want.h = height;
-		want.driverdata = NULL;
-		want.format = want.refresh_rate = 0; // don't care
-
-		if( !SDL_GetClosestDisplayMode(0, &want, &got) )
-			return rserr_invalid_mode;
-
-		MsgDev(D_NOTE, "Got closest display mode: %ix%i@%i\n", got.w, got.h, got.refresh_rate);
-
-		if( ( SDL_GetWindowFlags(host.hWnd) & SDL_WINDOW_FULLSCREEN ) == SDL_WINDOW_FULLSCREEN)
-			if( SDL_SetWindowFullscreen(host.hWnd, 0) == -1 )
-				return rserr_invalid_fullscreen;
-
-		if( SDL_SetWindowDisplayMode(host.hWnd, &got) )
-			return rserr_invalid_mode;
-
-		if( SDL_SetWindowFullscreen(host.hWnd, SDL_WINDOW_FULLSCREEN) == -1 )
-			return rserr_invalid_fullscreen;
-
-		R_ChangeDisplaySettingsFast( got.w, got.h );
-	}
-	else
-	{
-		if( SDL_SetWindowFullscreen(host.hWnd, 0) )
-			return rserr_invalid_fullscreen;
-		SDL_SetWindowSize(host.hWnd, width, height);
-		R_ChangeDisplaySettingsFast( width, height );
-	}
-#endif
-#endif // XASH_SDL
 	return rserr_ok;
 }
 
+
+qboolean VID_SetScreenResolution( int width, int height )
+{
+	return false;
+}
+
+void VID_RestoreScreenResolution( void )
+{
+
+}
 
 
 /*
@@ -843,70 +656,12 @@ Set the described video mode
 */
 qboolean VID_SetMode( void )
 {
-#ifdef XASH_SDL
-	qboolean	fullscreen = false;
-	int iScreenWidth, iScreenHeight;
-	rserr_t	err;
-
-	if( vid_mode->integer == -1 )	// trying to get resolution automatically by default
-	{
-		SDL_DisplayMode mode;
-
-		SDL_GetDesktopDisplayMode(0, &mode);
-
-		iScreenWidth = mode.w;
-		iScreenHeight = mode.h;
-
-		Cvar_SetFloat( "fullscreen", 1 );
-	}
-	else if( vid_mode->modified && vid_mode->integer >= 0 && vid_mode->integer <= num_vidmodes )
-	{
-		iScreenWidth = vidmode[vid_mode->integer].width;
-		iScreenHeight = vidmode[vid_mode->integer].height;
-	}
-	else
-	{
-		iScreenHeight = scr_height->integer;
-		iScreenWidth = scr_width->integer;
-	}
-
-	gl_swapInterval->modified = true;
-	fullscreen = Cvar_VariableInteger("fullscreen") != 0;
-
-	if(( err = R_ChangeDisplaySettings( iScreenWidth, iScreenHeight, fullscreen )) == rserr_ok )
-	{
-		glConfig.prev_width = iScreenWidth;
-		glConfig.prev_height = iScreenHeight;
-	}
-	else
-	{
-		if( err == rserr_invalid_fullscreen )
-		{
-			Cvar_SetFloat( "fullscreen", 0 );
-			MsgDev( D_ERROR, "VID_SetMode: fullscreen unavailable in this mode\n" );
-			if(( err = R_ChangeDisplaySettings( iScreenWidth, iScreenHeight, false )) == rserr_ok )
-				return true;
-		}
-		else if( err == rserr_invalid_mode )
-		{
-			Cvar_SetFloat( "vid_mode", glConfig.prev_mode );
-			MsgDev( D_ERROR, "VID_SetMode: invalid mode\n" );
-		}
-
-		// try setting it back to something safe
-		if(( err = R_ChangeDisplaySettings( glConfig.prev_width, glConfig.prev_height, false )) != rserr_ok )
-		{
-			MsgDev( D_ERROR, "VID_SetMode: could not revert to safe mode\n" );
-			return false;
-		}
-	}
-#endif
+	int width, height;
+	Android_GetScreenRes( &width, &height );
+	MsgDev( D_NOTE, "VID_SetMode(%d, %d)\n", width, height);
+	R_ChangeDisplaySettings( width, height, false );
 	return true;
 }
-
-#ifndef EGL_LIB
-#define EGL_LIB NULL
-#endif
 
 /*
 ==================
@@ -915,14 +670,16 @@ R_Init_OpenGL
 */
 qboolean R_Init_OpenGL( void )
 {
-	GL_SetupAttributes();
-#ifdef XASH_SDL
-	if( SDL_GL_LoadLibrary( EGL_LIB ) )
-	{
-		MsgDev( D_ERROR, "Couldn't initialize OpenGL: %s\n", SDL_GetError());
-		return false;
-	}
-#endif
+	searchpath_t	*search = FS_FindFile( GI->iconpath, NULL, true );
+
+	if( search )
+		Android_SetIcon( va( "%s/%s%s", host.rootdir, search->filename, GI->iconpath ) );
+
+	Android_SetTitle( GI->title );
+	VID_StartupGamma();
+	MsgDev( D_NOTE, "R_Init_OpenGL()\n");
+	Android_InitGL();
+
 	return VID_SetMode();
 }
 
@@ -939,12 +696,9 @@ void R_Free_OpenGL( void )
 	GL_DeleteContext ();
 
 	VID_DestroyWindow ();
-#ifdef XASH_SDL
-	SDL_GL_UnloadLibrary ();
-#endif
+
 	// now all extensions are disabled
 	Q_memset( glConfig.extension, 0, sizeof( glConfig.extension[0] ) * GL_EXTCOUNT );
 	glw_state.initialized = false;
 }
-#endif
-#endif // XASH_DEDICATED
+#endif // XASH_VIDEO

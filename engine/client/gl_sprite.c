@@ -212,10 +212,10 @@ void Mod_LoadSpriteModel( model_t *mod, byte *buffer, qboolean *loaded, uint tex
 	psprite->radius = pin.boundingradius;
 	psprite->synctype = pin.synctype;
 
-	mod->mins[0] = mod->mins[1] = -pin.bounds[0] / 2;
-	mod->maxs[0] = mod->maxs[1] = pin.bounds[0] / 2;
-	mod->mins[2] = -pin.bounds[1] / 2;
-	mod->maxs[2] = pin.bounds[1] / 2;
+	mod->mins[0] = mod->mins[1] = -pin.bounds[0] / 2.0f;
+	mod->maxs[0] = mod->maxs[1] = pin.bounds[0] / 2.0f;
+	mod->mins[2] = -pin.bounds[1] / 2.0f;
+	mod->maxs[2] = pin.bounds[1] / 2.0f;
 	buffer += sizeof(dsprite_t);
 	Q_memcpy(&numi, buffer, sizeof(short));
 
@@ -312,7 +312,7 @@ void Mod_LoadMapSprite( model_t *mod, const void *buffer, size_t size, qboolean 
 	msprite_t		*psprite;
 	int texFlags = TF_IMAGE;
 
-	if( cl_sprite_nearest->value )
+	if( cl_sprite_nearest->integer )
 		texFlags |= TF_NEAREST;
 
 	if( loaded ) *loaded = false;
@@ -516,7 +516,7 @@ mspriteframe_t *R_GetSpriteFrame( const model_t *pModel, int frame, float yaw )
 		}
 		pspriteframe = pspritegroup->frames[i];
 	}
-	else if( psprite->frames[frame].type == FRAME_ANGLED )
+	else if( psprite->frames[frame].type == FRAME_ANGLED ) //-V556
 	{
 		int	angleframe = (int)(Q_rint(( RI.refdef.viewangles[1] - yaw + 45.0f ) / 360 * 8) - 4) & 7;
 
@@ -564,11 +564,11 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 		frame = psprite->numframes - 1;
 	}
 
-	if( psprite->frames[frame].type == FRAME_SINGLE )
+	if( psprite->frames[frame].type == FRAME_SINGLE ) //-V556
 	{
 		if( m_fDoInterp )
 		{
-			if( ent->latched.prevblending[0] >= psprite->numframes || psprite->frames[ent->latched.prevblending[0]].type != FRAME_SINGLE )
+			if( ent->latched.prevblending[0] >= psprite->numframes || psprite->frames[ent->latched.prevblending[0]].type != FRAME_SINGLE ) //-V556
 			{
 				// this can be happens when rendering switched between single and angled frames
 				// or change model on replace delta-entity
@@ -613,7 +613,7 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 		if( oldframe ) *oldframe = psprite->frames[ent->latched.prevblending[0]].frameptr;
 		if( curframe ) *curframe = psprite->frames[frame].frameptr;
 	}
-	else if( psprite->frames[frame].type == FRAME_GROUP ) 
+	else if( psprite->frames[frame].type == FRAME_GROUP )  //-V556
 	{
 		pspritegroup = (mspritegroup_t *)psprite->frames[frame].frameptr;
 		pintervals = pspritegroup->intervals;
@@ -646,7 +646,7 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 		if( oldframe ) *oldframe = pspritegroup->frames[j];
 		if( curframe ) *curframe = pspritegroup->frames[i];
 	}
-	else if( psprite->frames[frame].type == FRAME_ANGLED )
+	else if( psprite->frames[frame].type == FRAME_ANGLED ) //-V556
 	{
 		// e.g. doom-style sprite monsters
 		float	yaw = ent->angles[YAW];
@@ -654,7 +654,7 @@ float R_GetSpriteFrameInterpolant( cl_entity_t *ent, mspriteframe_t **oldframe, 
 
 		if( m_fDoInterp )
 		{
-			if( ent->latched.prevblending[0] >= psprite->numframes || psprite->frames[ent->latched.prevblending[0]].type != FRAME_ANGLED )
+			if( ent->latched.prevblending[0] >= psprite->numframes || psprite->frames[ent->latched.prevblending[0]].type != FRAME_ANGLED ) //-V556
 			{
 				// this can be happens when rendering switched between single and angled frames
 				// or change model on replace delta-entity
@@ -926,7 +926,7 @@ void R_DrawSpriteModel( cl_entity_t *e )
 	float		angle, dot, sr, cr, flAlpha;
 	float		lerp = 1.0f, ilerp, scale;
 	vec3_t		v_forward, v_right, v_up;
-	vec3_t		origin, color, color2;
+	vec3_t		origin, color, color2 = {0.0f};
 
 	if( RI.params & RP_ENVVIEW )
 		return;

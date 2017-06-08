@@ -18,8 +18,8 @@ GNU General Public License for more details.
 #include "net_encode.h"
 
 #include "errno.h"
-
-#define HEARTBEAT_SECONDS	300.0f 		// 300 seconds
+#include "Sequence.h"
+#define HEARTBEAT_SECONDS	(sv_nat->integer?60.0f:300.0f) 		// 1 or 5 minutes
 
 convar_t	*sv_zmax;
 convar_t	*sv_novis;			// disable server culling entities by vis
@@ -43,8 +43,12 @@ convar_t	*sv_rollspeed;
 convar_t	*sv_wallbounce;
 convar_t	*sv_maxspeed;
 convar_t	*sv_spectatormaxspeed;
+
+
 convar_t	*sv_accelerate;
 convar_t	*sv_friction;
+
+
 convar_t	*sv_edgefriction;
 convar_t	*sv_waterfriction;
 convar_t	*sv_stopspeed;
@@ -60,7 +64,6 @@ convar_t	*sv_allow_upload;
 convar_t	*sv_allow_download;
 convar_t	*sv_allow_fragment;
 convar_t	*sv_downloadurl;
-convar_t	*sv_clientclean;
 convar_t	*sv_allow_studio_attachment_angles;
 convar_t	*sv_allow_rotate_pushables;
 convar_t	*sv_allow_godmode;
@@ -78,8 +81,6 @@ convar_t	*sv_sendvelocity;
 convar_t	*sv_airmove;
 convar_t	*sv_quakehulls;
 convar_t	*mp_consistency;
-convar_t	*serverinfo;
-convar_t	*physinfo;
 convar_t	*clockwindow;
 convar_t	*deathmatch;
 convar_t	*teamplay;
@@ -90,6 +91,11 @@ convar_t	*sv_trace_messages;
 convar_t	*sv_master;
 convar_t	*sv_corpse_solid;
 convar_t	*sv_fixmulticast;
+convar_t	*sv_allow_split;
+convar_t	*sv_allow_compress;
+convar_t	*sv_maxpacket;
+convar_t	*sv_forcesimulating;
+convar_t	*sv_nat;
 
 // sky variables
 convar_t	*sv_skycolor_r;
@@ -105,8 +111,15 @@ convar_t	*sv_skydir_y;
 convar_t	*sv_skydir_z;
 convar_t	*sv_skyangle;
 convar_t	*sv_skyspeed;
+convar_t	*sv_allow_noinputdevices;
+convar_t	*sv_allow_touch;
+convar_t	*sv_allow_mouse;
+convar_t	*sv_allow_joystick;
+convar_t	*sv_allow_vr;
 
 void Master_Shutdown( void );
+
+char localinfo[MAX_LOCALINFO];
 
 //============================================================================
 
@@ -120,36 +133,17 @@ Updates the cl->ping variables
 void SV_CalcPings( void )
 {
 	sv_client_t	*cl;
-	int		i, j;
-	int		total, count;
-
-	//if( !svs.clients )
-	return;
+	int			i;
 
 	// clamp fps counter
 	for( i = 0; i < sv_maxclients->integer; i++ )
 	{
 		cl = &svs.clients[i];
 
-		if( cl->state != cs_spawned || cl->fakeclient )
+		if( cl->state != cs_spawned )
 			continue;
 
-		total = count = 0;
-
-		for( j = 0; j < (SV_UPDATE_BACKUP / 2); j++ )
-		{
-			client_frame_t	*frame;
-
-			frame = &cl->frames[(cl->netchan.incoming_acknowledged - (j + 1)) & SV_UPDATE_MASK];
-			if( frame->latency > 0 )
-			{
-				count++;
-				total += frame->latency;
-			}
-		}
-
-		if( !count ) cl->ping = 0;
-		else cl->ping = total / count;
+		cl->ping = SV_CalcPing( cl );
 	}
 }
 
@@ -284,7 +278,7 @@ void SV_UpdateServerInfo( void )
 {
 	if( !serverinfo->modified ) return;
 
-	Cvar_LookupVars( CVAR_SERVERINFO, NULL, NULL, (setpair_t)pfnUpdateServerInfo ); 
+	Cvar_LookupVars( CVAR_SERVERINFO, NULL, NULL, (setpair_t)pfnUpdateServerInfo );
 
 	serverinfo->modified = false;
 }
@@ -343,9 +337,10 @@ void SV_ReadPackets( void )
 
 	while( NET_GetPacket( NS_SERVER, &net_from, net_message_buffer, &curSize ))
 	{
-		BF_Init( &net_message, "ClientPacket", net_message_buffer, curSize );
 		if( !svs.initialized )
 		{
+			BF_Init( &net_message, "ClientPacket", net_message_buffer, curSize );
+
 			// check for rcon here
 			if( BF_GetMaxBytes( &net_message ) >= 4 && *(int *)net_message.pData == -1 )
 			{
@@ -362,12 +357,47 @@ void SV_ReadPackets( void )
 			}
 			continue;
 		}
+		if( *((int *)&net_message_buffer) == 0xFFFFFFFE )
+		{
+			if( curSize <= NETSPLIT_HEADER_SIZE )
+				continue;
+
+			// find client with this address and enabled netsplit
+			// netsplit packets does not allow changing ports
+
+			for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ )
+			{
+				if( cl->state == cs_free || cl->fakeclient )
+					continue;
+
+				if( !NET_CompareBaseAdr( net_from, cl->netchan.remote_address ))
+					continue;
+
+				if( !cl->netchan.split )
+					continue;
+			}
+
+			// not a client
+			if( i >= sv_maxclients->integer )
+			{
+				MsgDev( D_INFO, "netsplit from unknown addr %s\n", NET_AdrToString( net_from ) );
+				continue;
+			}
+
+			// Will rewrite existing packet by merged
+			// Client will not send compressed split packets
+			if( !NetSplit_GetLong( &cl->netchan.netsplit, &net_from, net_message_buffer, &curSize, false ) )
+				continue;
+		}
+		BF_Init( &net_message, "ClientPacket", net_message_buffer, curSize );
+
 		// check for connectionless packet (0xffffffff) first
 		if( BF_GetMaxBytes( &net_message ) >= 4 && *(int *)net_message.pData == -1 )
 		{
 			SV_ConnectionlessPacket( net_from, &net_message );
 			continue;
 		}
+
 
 		// read the qport out of the message so we can fix up
 		// stupid address translating routers
@@ -395,8 +425,9 @@ void SV_ReadPackets( void )
 			}
 
 			if( Netchan_Process( &cl->netchan, &net_message ))
-			{	
-				cl->send_message = true; // reply at end of frame
+			{
+				if( sv_maxclients->integer == 1 || cl->state != cs_spawned )
+					cl->send_message = true; // reply at end of frame
 
 				// this is a valid, sequenced packet, so process it
 				if( cl->state != cs_zombie )
@@ -458,7 +489,7 @@ void SV_CheckTimeouts( void )
 		{
 			if( cl->edict && !( cl->edict->v.flags & (FL_SPECTATOR|FL_FAKECLIENT)))
 				numclients++;
-                    }
+					}
 
 		// fake clients do not timeout
 		if( cl->fakeclient ) cl->lastmessage = host.realtime;
@@ -491,7 +522,7 @@ void SV_CheckTimeouts( void )
 		if(( cl->state == cs_connected || cl->state == cs_spawned ) && cl->lastmessage < droppoint && !NET_IsLocalAddress( cl->netchan.remote_address ))
 		{
 			SV_BroadcastPrintf( PRINT_HIGH, "%s timed out\n", cl->name );
-			SV_DropClient( cl ); 
+			SV_DropClient( cl );
 			cl->state = cs_free; // don't bother with zombie state
 		}
 	}
@@ -575,6 +606,9 @@ SV_IsSimulating
 */
 qboolean SV_IsSimulating( void )
 {
+	if ( sv_forcesimulating->integer )
+		return true;
+
 	if( sv.background && SV_Active() && CL_Active())
 	{
 		if( CL_IsInConsole( ))
@@ -642,7 +676,7 @@ void Host_ServerFrame( void )
 
 	// let everything in the world think and move
 	SV_RunGameFrame ();
-		
+
 	// send messages back to the clients that had packets read this frame
 	SV_SendClientMessages ();
 
@@ -746,32 +780,79 @@ void SV_AddToMaster( netadr_t from, sizebuf_t *msg )
 
 	challenge = BF_ReadUBitLong( msg, sizeof( uint ) << 3 );
 
-	Info_SetValueForKey(s, "protocol",  va( "%d", PROTOCOL_VERSION ) ); // protocol version
-	Info_SetValueForKey(s, "challenge", va( "%u", challenge ) ); // challenge number
-	Info_SetValueForKey(s, "players",   va( "%d", clients ) ); // current player number, without bots
-	Info_SetValueForKey(s, "max",       sv_maxclients->string ); // max_players
-	Info_SetValueForKey(s, "bots",      va( "%d", bots ) ); // bot count
-	Info_SetValueForKey(s, "gamedir",   GI->gamedir ); // gamedir
-	Info_SetValueForKey(s, "map",       sv.name ); // current map
+	Info_SetValueForKey(s, "protocol",  va( "%d", PROTOCOL_VERSION ), sizeof( s ) ); // protocol version
+	Info_SetValueForKey(s, "challenge", va( "%u", challenge ), sizeof( s )  ); // challenge number
+	Info_SetValueForKey(s, "players",   va( "%d", clients ), sizeof( s ) ); // current player number, without bots
+	Info_SetValueForKey(s, "max",       sv_maxclients->string, sizeof( s ) ); // max_players
+	Info_SetValueForKey(s, "bots",      va( "%d", bots ), sizeof( s ) ); // bot count
+	Info_SetValueForKey(s, "gamedir",   GI->gamedir, sizeof( s ) ); // gamedir
+	Info_SetValueForKey(s, "map",       sv.name, sizeof( s ) ); // current map
 	if( Host_IsDedicated() )
-		Info_SetValueForKey(s, "type",  "d" ); // dedicated
+		Info_SetValueForKey(s, "type",  "d", sizeof( s ) ); // dedicated
 	else
-		Info_SetValueForKey(s, "type",  "l" ); // local
-	Info_SetValueForKey(s, "password",  "0" ); // is password set
+		Info_SetValueForKey(s, "type",  "l", sizeof( s ) ); // local
+	Info_SetValueForKey(s, "password",  "0", sizeof( s ) ); // is password set
 
 #ifdef _WIN32
-	Info_SetValueForKey(s, "os",        "w" ); // Windows
+	Info_SetValueForKey(s, "os",        "w", sizeof( s ) ); // Windows
 #else
-	Info_SetValueForKey(s, "os",        "l" ); // Linux
+	Info_SetValueForKey(s, "os",        "l", sizeof( s ) ); // Linux
 #endif
 
-	Info_SetValueForKey(s, "secure",    "0" ); // server anti-cheat
-	Info_SetValueForKey(s, "lan",       "0" ); // LAN servers doesn't send info to master
-	Info_SetValueForKey(s, "version",   XASH_VERSION ); // server region. 255 -- all regions
-	Info_SetValueForKey(s, "region",    "255" ); // server region. 255 -- all regions
-	Info_SetValueForKey(s, "product",   GI->gamefolder ); // product? Where is the difference with gamedir?
+	Info_SetValueForKey(s, "secure",    "0", sizeof( s ) ); // server anti-cheat
+	Info_SetValueForKey(s, "lan",       "0", sizeof( s ) ); // LAN servers doesn't send info to master
+	Info_SetValueForKey(s, "version",   XASH_VERSION, sizeof( s ) ); // server region. 255 -- all regions
+	Info_SetValueForKey(s, "region",    "255", sizeof( s ) ); // server region. 255 -- all regions
+	Info_SetValueForKey(s, "product",   GI->gamefolder, sizeof( s ) ); // product? Where is the difference with gamedir?
+	Info_SetValueForKey(s, "nat",       sv_nat->string, sizeof( s ) ); // Server running under NAT, use reverse connection
 
 	NET_SendPacket( NS_SERVER, Q_strlen( s ), s, from );
+}
+
+/*
+====================
+SV_ProcessUserAgent
+
+send error message and return false on wrong input devices
+====================
+*/
+qboolean SV_ProcessUserAgent( netadr_t from, char *useragent )
+{
+	char *input_devices_str = Info_ValueForKey( useragent,"d" );
+
+	if( !sv_allow_noinputdevices->integer && ( !input_devices_str || !input_devices_str[0] ) )
+	{
+		Netchan_OutOfBandPrint( NS_SERVER, from, "print\nThis server does not allow\nconnect without input devices list.\nPlease update your engine.\n");
+		return false;
+	}
+
+	if( input_devices_str )
+	{
+		int input_devices = Q_atoi( input_devices_str );
+
+		if( !sv_allow_touch->integer && ( input_devices & INPUT_DEVICE_TOUCH ) )
+		{
+			Netchan_OutOfBandPrint( NS_SERVER, from, "errormsg\nThis server does not allow touch\nDisable it (touch_enable 0)\nto play on this server\n");
+			return false;
+		}
+		if( !sv_allow_mouse->integer && ( input_devices & INPUT_DEVICE_MOUSE) )
+		{
+			Netchan_OutOfBandPrint( NS_SERVER, from, "errormsg\nThis server does not allow mouse\nDisable it(m_ignore 1)\nto play on this server\n");
+			return false;
+		}
+		if( !sv_allow_joystick->integer && ( input_devices & INPUT_DEVICE_JOYSTICK) )
+		{
+			Netchan_OutOfBandPrint( NS_SERVER, from, "errormsg\nThis server does not allow joystick\nDisable it(joy_enable 0)\nto play on this server\n");
+			return false;
+		}
+		if( !sv_allow_vr->integer && ( input_devices & INPUT_DEVICE_VR) )
+		{
+			Netchan_OutOfBandPrint( NS_SERVER, from, "errormsg\nThis server does not allow VR\n");
+			return false;
+		}
+	}
+
+	return true;
 }
 
 //============================================================================
@@ -801,6 +882,7 @@ void SV_Init( void )
 	Cvar_Get ("servercfgfile","server.cfg", 0, "name of dedicated server configuration file" );
 	Cvar_Get ("lservercfgfile","listenserver.cfg", 0, "name of listen server configuration file" );
 	Cvar_Get ("mapchangecfgfile","", 0, "name of map change configuration file" );
+	Cvar_Get ("bannedcfgfile", "banned.cfg", 0, "name of banned.cfg file" );
 	Cvar_Get ("motdfile", "motd.txt", 0, "name of 'message of the day' file" );
 	Cvar_Get ("sv_language", "0", 0, "game language (currently unused)" );
 	Cvar_Get ("suitvolume", "0.25", CVAR_ARCHIVE, "HEV suit volume" );
@@ -836,7 +918,7 @@ void SV_Init( void )
 	rcon_password = Cvar_Get( "rcon_password", "", 0, "remote connect password" );
 	sv_stepsize = Cvar_Get( "sv_stepsize", "18", CVAR_ARCHIVE|CVAR_PHYSICINFO, "how high you can step up" );
 	sv_newunit = Cvar_Get( "sv_newunit", "0", 0, "sets to 1 while new unit is loading" );
-	hostname = Cvar_Get( "hostname", "unnamed", CVAR_SERVERNOTIFY|CVAR_SERVERNOTIFY|CVAR_ARCHIVE, "host name" );
+	hostname = Cvar_Get( "hostname", "unnamed", CVAR_SERVERNOTIFY|CVAR_ARCHIVE, "host name" );
 	sv_timeout = Cvar_Get( "sv_timeout", "125", CVAR_SERVERNOTIFY, "connection timeout" );
 	zombietime = Cvar_Get( "zombietime", "2", CVAR_SERVERNOTIFY, "timeout for clients-zombie (who died but not respawned)" );
 	sv_pausable = Cvar_Get( "pausable", "1", CVAR_SERVERNOTIFY, "allow players to pause or not" );
@@ -880,7 +962,6 @@ void SV_Init( void )
 	sv_allow_download = Cvar_Get( "sv_allow_download", "0", CVAR_ARCHIVE, "allow clients to download missing resources" );
 	sv_allow_fragment = Cvar_Get( "sv_allow_fragment", "0", CVAR_ARCHIVE, "allow direct download from server" );
 	sv_downloadurl = Cvar_Get( "sv_downloadurl", "", CVAR_ARCHIVE, "custom fastdl server to pass to client" );
-	sv_clientclean = Cvar_Get( "sv_clientclean", "0", CVAR_ARCHIVE, "client cleaning mode (0-3), useful for bots" );
 	sv_send_logos = Cvar_Get( "sv_send_logos", "1", 0, "send custom player decals to other clients" );
 	sv_send_resources = Cvar_Get( "sv_send_resources", "1", 0, "send generic resources that are specified in 'mapname.res'" );
 	sv_sendvelocity = Cvar_Get( "sv_sendvelocity", "1", CVAR_ARCHIVE, "force to send velocity for event_t structure across network" );
@@ -890,9 +971,20 @@ void SV_Init( void )
 	sv_novis = Cvar_Get( "sv_novis", "0", 0, "disable server-side visibility checking" );
 	sv_skipshield = Cvar_Get( "sv_skipshield", "0", CVAR_ARCHIVE, "skip shield hitbox");
 	sv_trace_messages = Cvar_Get( "sv_trace_messages", "0", CVAR_ARCHIVE|CVAR_LATCH, "enable server usermessages tracing (good for developers)" );
-	sv_master = Cvar_Get( "sv_master", MASTERSERVER_ADR, CVAR_ARCHIVE, "master server address" );
+	sv_master = Cvar_Get( "sv_master", DEFAULT_SV_MASTER, CVAR_ARCHIVE, "master server address" );
 	sv_corpse_solid = Cvar_Get( "sv_corpse_solid", "0", CVAR_ARCHIVE, "make corpses solid" );
 	sv_fixmulticast = Cvar_Get( "sv_fixmulticast", "1", CVAR_ARCHIVE, "do not send multicast to not spawned clients" );
+	sv_allow_compress = Cvar_Get( "sv_allow_compress", "1", CVAR_ARCHIVE, "allow Huffman compression on server" );
+	sv_allow_split= Cvar_Get( "sv_allow_split", "1", CVAR_ARCHIVE, "allow splitting packets on server" );
+	sv_maxpacket = Cvar_Get( "sv_maxpacket", "2000", CVAR_ARCHIVE, "limit cl_maxpacket for all clients" );
+	sv_forcesimulating = Cvar_Get( "sv_forcesimulating", "0", CVAR_ARCHIVE, "forcing world simulating when server don't have active players" );
+	sv_nat = Cvar_Get( "sv_nat", "0", 0, "enable NAT bypass for this server" );
+
+	sv_allow_joystick = Cvar_Get("sv_allow_joystick", "1", CVAR_ARCHIVE, "allow connect with joystick enabled" );
+	sv_allow_mouse = Cvar_Get("sv_allow_mouse", "1", CVAR_ARCHIVE, "allow connect with mouse" );
+	sv_allow_touch = Cvar_Get("sv_allow_touch", "1", CVAR_ARCHIVE, "allow connect with touch controls" );
+	sv_allow_vr = Cvar_Get("sv_allow_vr", "1", CVAR_ARCHIVE, "allow connect from vr version" );
+	sv_allow_noinputdevices = Cvar_Get("sv_allow_noinputdevices", "1", CVAR_ARCHIVE, "allow connect from old versions without useragent" );
 
 	Cmd_AddCommand( "download_resources", SV_DownloadResources_f, "try to download missing resources to server");
 
@@ -961,9 +1053,8 @@ before Sys_Quit or Sys_Error
 void SV_Shutdown( qboolean reconnect )
 {
 	// already freed
-	if( !SV_Active( )) // library may be loaded
+	if( !SV_Active( ))
 	{
-		SV_UnloadProgs();
 		return;
 	}
 
@@ -979,8 +1070,9 @@ void SV_Shutdown( qboolean reconnect )
 	if( public_server->integer && sv_maxclients->integer != 1 )
 		Master_Shutdown();
 
-	if( !reconnect ) SV_UnloadProgs ();
-	else SV_DeactivateServer ();
+	Sequence_PurgeEntries( true ); // clear Sequence
+
+	SV_DeactivateServer ();
 
 	// free current level
 	Q_memset( &sv, 0, sizeof( sv ));
@@ -989,19 +1081,19 @@ void SV_Shutdown( qboolean reconnect )
 	// free server static data
 	if( svs.clients )
 	{
-		Z_Free( svs.clients );
+		Mem_Free( svs.clients );
 		svs.clients = NULL;
 	}
 
 	if( svs.baselines )
 	{
-		Z_Free( svs.baselines );
+		Mem_Free( svs.baselines );
 		svs.baselines = NULL;
 	}
 
 	if( svs.packet_entities )
 	{
-		Z_Free( svs.packet_entities );
+		Mem_Free( svs.packet_entities );
 		svs.packet_entities = NULL;
 		svs.num_client_entities = 0;
 		svs.next_client_entities = 0;

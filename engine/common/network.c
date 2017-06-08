@@ -31,7 +31,6 @@ GNU General Public License for more details.
 #include <errno.h>
 #include <fcntl.h>
 #endif
-#include "port.h"
 #include "common.h"
 #include "netchan.h"
 
@@ -105,6 +104,7 @@ void NET_FreeWinSock( void )
 	Sys_FreeLibrary( &winsock_dll );
 }
 #else
+
 #define pHtons htons
 #define pConnect connect
 #define pInet_Addr inet_addr
@@ -125,6 +125,16 @@ void NET_FreeWinSock( void )
 #define pGetHostByName gethostbyname
 #define pSelect select
 #define SOCKET int
+#endif
+
+#ifdef __EMSCRIPTEN__
+/* All socket operations are non-blocking already */
+static int ioctl_stub( int d, unsigned long r, ...)
+{
+	return 0;
+}
+#undef pIoctlSocket
+#define pIoctlSocket ioctl_stub
 #endif
 
 typedef struct
@@ -735,8 +745,6 @@ static int NET_IPSocket( const char *netInterface, int port )
 	if( pSetSockopt( net_socket, SOL_SOCKET, SO_BROADCAST, (char *)&_true, sizeof( _true )) < 0 )
 	{
 		MsgDev( D_WARN, "NET_UDPSocket: setsockopt SO_BROADCAST = %s\n", NET_ErrorString( ));
-		pCloseSocket( net_socket );
-		return 0;
 	}
 #endif
 
@@ -1215,7 +1223,7 @@ void HTTP_FreeFile( httpfile_t *file, qboolean error )
 		if( last_file == first_file )
 		{
 			last_file = first_file = 0;
-			HTTP_ClearCustomServers();
+			//HTTP_ClearCustomServers();
 		}
 		else
 			first_file = file->next;
@@ -1299,10 +1307,10 @@ void HTTP_Run( void )
 		// Now set non-blocking mode
 		// You may skip this if not supported by system,
 		// but download will lock engine, maybe you will need to add manual returns
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__) || defined(__FreeBSD__) || defined __EMSCRIPTEN__
 		mode = 1;
 		pIoctlSocket( curfile->socket, FIONBIO, &mode );
-#elif !defined(__FreeBSD__)
+#else
 		// SOCK_NONBLOCK is not portable, so use fcntl
 		fcntl( curfile->socket, F_SETFL, fcntl( curfile->socket, F_GETFL, 0 ) | O_NONBLOCK );
 #endif
@@ -1318,6 +1326,8 @@ void HTTP_Run( void )
 		{
 #ifdef _WIN32
 			if( pWSAGetLastError() == WSAEINPROGRESS || pWSAGetLastError() == WSAEWOULDBLOCK )
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined __EMSCRIPTEN__
+			if( errno == EINPROGRESS || errno == EWOULDBLOCK )
 #else
 			if( errno == EINPROGRESS ) // Should give EWOOLDBLOCK if try recv too soon
 #endif
@@ -1354,7 +1364,9 @@ void HTTP_Run( void )
 			{
 #ifdef _WIN32
 				if( pWSAGetLastError() != WSAEWOULDBLOCK && pWSAGetLastError() != WSAENOTCONN )
-#elif !defined(__FreeBSD__)
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined __EMSCRIPTEN__
+				if( errno != EWOULDBLOCK && errno != ENOTCONN )
+#else
 				if( errno != EWOULDBLOCK )
 #endif
 				{
@@ -1362,7 +1374,6 @@ void HTTP_Run( void )
 					HTTP_FreeFile( curfile, true );
 					return;
 				}
-#ifndef __FreeBSD__
 				// increase counter when blocking
 				curfile->blocktime += host.frametime;
 
@@ -1373,7 +1384,6 @@ void HTTP_Run( void )
 					return;
 				}
 				return;
-#endif
 			}
 			else
 			{
@@ -1411,7 +1421,7 @@ void HTTP_Run( void )
 					return;
 				}
 				// print size
-				length = Q_strstr(header, "Content-Length: ");
+				length = Q_stristr(header, "Content-Length: ");
 				if( length )
 				{
 					int size = Q_atoi( length += 16 );
@@ -1781,7 +1791,7 @@ void HTTP_Init( void )
 		}
 		token = lineend;
 	}*/
-	line = serverfile = (char *)FS_LoadFile( "fastdl.txt", 0, true );
+	line = serverfile = (char *)FS_LoadFile( "fastdl.txt", 0, false );
 	if( serverfile )
 	{
 		while( ( line = COM_ParseFile( line, token ) ) )

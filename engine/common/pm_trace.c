@@ -161,6 +161,9 @@ hull_t *PM_HullForStudio( physent_t *pe, playermove_t *pmove, int *numhitboxes )
 	VectorSubtract( pmove->player_maxs[pmove->usehull], pmove->player_mins[pmove->usehull], size );
 	VectorScale( size, 0.5f, size );
 
+	if( pe->player )
+		 return PM_HullForBox( pe->mins, pe->maxs );
+
 	return Mod_HullForStudio( pe->studiomodel, pe->frame, pe->sequence, pe->angles, pe->origin, size, pe->controller, pe->blending, numhitboxes, NULL );
 }
 /* "Not a number" possible here.
@@ -417,7 +420,7 @@ pmtrace_t PM_PlayerTraceExt( playermove_t *pmove, vec3_t start, vec3_t end, int 
 			if( transform_bbox )
 			{
 				World_TransformAABB( matrix, pmove->player_mins[pmove->usehull], pmove->player_maxs[pmove->usehull], mins, maxs );
-				VectorSubtract( hull->clip_mins, mins, offset );	// calc new local offset
+				VectorSubtract( hull[0].clip_mins, mins, offset );	// calc new local offset
 
 				for( j = 0; j < 3; j++ )
 				{
@@ -457,7 +460,7 @@ pmtrace_t PM_PlayerTraceExt( playermove_t *pmove, vec3_t start, vec3_t end, int 
 		}
 		else if( hullcount == 1 )
 		{
-			PM_RecursiveHullCheck( hull, hull->firstclipnode, 0, 1, start_l, end_l, &trace_bbox );
+			PM_RecursiveHullCheck( hull, hull[0].firstclipnode, 0, 1, start_l, end_l, &trace_bbox );
 		}
 		else
 		{
@@ -592,7 +595,7 @@ int PM_TestPlayerPosition( playermove_t *pmove, vec3_t pos, pmtrace_t *ptrace, p
 			if( transform_bbox )
 			{
 				World_TransformAABB( matrix, pmove->player_mins[pmove->usehull], pmove->player_maxs[pmove->usehull], mins, maxs );
-				VectorSubtract( hull->clip_mins, mins, offset );	// calc new local offset
+				VectorSubtract( hull[0].clip_mins, mins, offset );	// calc new local offset
 
 				for( j = 0; j < 3; j++ )
 				{
@@ -627,7 +630,7 @@ int PM_TestPlayerPosition( playermove_t *pmove, vec3_t pos, pmtrace_t *ptrace, p
 		}
 		else if( hullcount == 1 )
 		{
-			if( PM_HullPointContents( hull, hull->firstclipnode, pos_l ) == CONTENTS_SOLID )
+			if( PM_HullPointContents( hull, hull[0].firstclipnode, pos_l ) == CONTENTS_SOLID )
 				return i;
 		}
 		else

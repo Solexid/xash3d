@@ -18,6 +18,7 @@ GNU General Public License for more details.
 #include "common.h"
 #include "library.h"
 #include "filesystem.h"
+#include "server.h"
 
 char lasterror[1024] = "";
 const char *Com_GetLibraryError()
@@ -35,6 +36,25 @@ void Com_PushLibraryError( const char *error )
 	Q_strncat( lasterror, error, sizeof( lasterror ) );
 	Q_strncat( lasterror, "\n", sizeof( lasterror ) );
 }
+
+void *Com_FunctionFromName_SR( void *hInstance, const char *pName )
+{
+	#ifdef XASH_ALLOW_SAVERESTORE_OFFSETS
+	if( !Q_memcmp( pName, "ofs:",4 ) )
+		return svgame.dllFuncs.pfnGameInit + Q_atoi(pName + 4);
+	#endif
+	return Com_FunctionFromName( hInstance, pName );
+}
+
+#ifdef XASH_ALLOW_SAVERESTORE_OFFSETS
+char *Com_OffsetNameForFunction( void *function )
+{
+	static string sname;
+	Q_snprintf( sname, MAX_STRING, "ofs:%d", (int)(void*)(function - (void*)svgame.dllFuncs.pfnGameInit) );
+	MsgDev( D_NOTE, "Com_OffsetNameForFunction %s\n", sname );
+	return sname;
+}
+#endif
 
 #ifndef _WIN32
 
@@ -72,6 +92,64 @@ int dladdr( const void *addr, Dl_info *info )
 {
 	return 0;
 }
+
+
+
+#endif
+#ifdef XASH_SDL
+#include <SDL_filesystem.h>
+#endif
+
+#ifdef TARGET_OS_IPHONE
+
+static void *IOS_LoadLibraryInternal( const char *dllname )
+{
+	void *pHandle;
+	string errorstring = "";
+	char path[MAX_SYSPATH];
+	
+	// load frameworks from Documents directory
+	// frameworks should be signed with same key with application
+	// Useful for debug to prevent rebuilding app on every library update
+	// NOTE: Apple polices forbids loading code from shared places
+#ifdef ENABLE_FRAMEWORK_SIDELOAD
+	Q_snprintf( path, MAX_SYSPATH, "%s.framework/lib", dllname );
+	if( pHandle = dlopen( path, RTLD_LAZY ) )
+		return pHandle;
+	Q_snprintf( errorstring, MAX_STRING, dlerror() );
+#endif
+	
+#ifdef DLOPEN_FRAMEWORKS
+	// load frameworks as it should be located in Xcode builds
+	Q_snprintf( path, MAX_SYSPATH, "%s%s.framework/lib", SDL_GetBasePath(), dllname );
+#else
+	// load libraries from app root to allow re-signing ipa with custom utilities
+	Q_snprintf( path, MAX_SYSPATH, "%s%s", SDL_GetBasePath(), dllname );
+#endif
+	pHandle = dlopen( path, RTLD_LAZY );
+	if( !pHandle )
+	{
+		Com_PushLibraryError(errorstring);
+		Com_PushLibraryError(dlerror());
+	}
+	return pHandle;
+}
+extern char *g_szLibrarySuffix;
+static void *IOS_LoadLibrary( const char *dllname )
+{
+	string name;
+	char *postfix = g_szLibrarySuffix;
+	char *pHandle;
+
+	if( !postfix ) postfix = GI->gamedir;
+
+	Q_snprintf( name, MAX_STRING, "%s_%s", dllname, postfix );
+	pHandle = IOS_LoadLibraryInternal( name );
+	if( pHandle )
+		return pHandle;
+	return IOS_LoadLibraryInternal( dllname );
+}
+
 #endif
 
 
@@ -80,8 +158,27 @@ void *Com_LoadLibrary( const char *dllname, int build_ordinals_table )
 	searchpath_t	*search = NULL;
 	int		pack_ind;
 	char	path [MAX_SYSPATH];
-
 	void *pHandle;
+
+#if TARGET_OS_IPHONE
+	return IOS_LoadLibrary(dllname);
+#endif
+
+#ifdef __EMSCRIPTEN__
+	{
+		string prefix;
+		Q_strcpy(prefix, getenv( "LIBRARY_PREFIX" ) );
+		Q_snprintf( path, MAX_SYSPATH, "%s%s%s",  prefix, dllname, getenv( "LIBRARY_SUFFIX" ) );
+		pHandle = dlopen( path, RTLD_LAZY );
+		if( !pHandle )
+		{
+			Com_PushLibraryError( va("Loading %s:\n", path ) );
+			Com_PushLibraryError( dlerror() );
+		}
+		return pHandle;
+	}
+#endif
+
 	qboolean dll = host.enabledll && ( Q_stristr( dllname, ".dll" ) != 0 );
 #ifdef DLL_LOADER
 	if(dll)
@@ -111,6 +208,7 @@ void *Com_LoadLibrary( const char *dllname, int build_ordinals_table )
 		}
 		sprintf( path, "%s%s", search->filename, dllname );
 
+
 #ifdef DLL_LOADER
 		if(dll)
 		{
@@ -127,7 +225,7 @@ void *Com_LoadLibrary( const char *dllname, int build_ordinals_table )
 		{
 			pHandle = dlopen( path, RTLD_LAZY );
 			if( !pHandle )
-				Com_PushLibraryError(dlerror());
+				Com_PushLibraryError( dlerror() );
 		}
 		if(!pHandle)
 		{
@@ -169,7 +267,7 @@ void *Com_FunctionFromName( void *hInstance, const char *pName )
 		return Loader_GetProcAddress(hInstance, pName);
 	else
 #endif
-	function = dlsym( hInstance, pName );	
+	function = dlsym( hInstance, pName );
 	if(!function)
 	{
 #ifdef __ANDROID__
@@ -209,10 +307,14 @@ const char *Com_NameForFunction( void *hInstance, void *function )
 #endif
 	// Note: dladdr() is a glibc extension
 	{
-		Dl_info info;
+		Dl_info info = {0};
 		dladdr((void*)function, &info);
-		return info.dli_sname;
+		if(info.dli_sname)
+			return info.dli_sname;
 	}
+#ifdef XASH_ALLOW_SAVERESTORE_OFFSETS
+	return Com_OffsetNameForFunction( function );
+#endif
 }
 #elif defined __amd64__
 #include <dbghelp.h>
@@ -238,6 +340,7 @@ void *Com_FunctionFromName( void *hInstance, const char *name )
 
 const char *Com_NameForFunction( void *hInstance, void *function )
 {
+#if 0
 	static qboolean initialized = false;
 	if( initialized )
 	{
@@ -271,6 +374,12 @@ const char *Com_NameForFunction( void *hInstance, void *function )
 		}
 
 	}
+#endif
+
+#ifdef XASH_ALLOW_SAVERESTORE_OFFSETS
+	return Com_OffsetNameForFunction( function );
+#endif
+
 	return NULL;
 }
 
@@ -287,6 +396,11 @@ const char *Com_NameForFunction( void *hInstance, void *function )
 // Vista SDKs no longer define IMAGE_SIZEOF_BASE_RELOCATION!?
 #define IMAGE_SIZEOF_BASE_RELOCATION (sizeof(IMAGE_BASE_RELOCATION))
 #endif
+
+#if defined(_M_X64)
+#error "Xash's nonstandart loader will not work on Win64. Set target to Win32 or disable nonstandart loader"
+#endif
+
 
 typedef struct
 {
@@ -1141,7 +1255,7 @@ void *Com_FunctionFromName(void *hInstance, const char *pName)
 		if( !Q_strcmp( pName, hInst->names[i] ))
 		{
 			index = hInst->ordinals[i];
-			return hInst->funcs[index] + hInst->funcBase;
+			return (void*)(hInst->funcs[index] + hInst->funcBase);
 		}
 	}
 	// couldn't find the function name to return address
@@ -1160,7 +1274,8 @@ const char *Com_NameForFunction( void *hInstance, void * function )
 	{
 		index = hInst->ordinals[i];
 
-		if(( (char*)function - hInst->funcBase ) == hInst->funcs[index] )
+		// 32 bit only cast :(
+		if( ( (dword)function - hInst->funcBase ) == hInst->funcs[index] )
 			return hInst->names[i];
 	}
 	// couldn't find the function address to return name

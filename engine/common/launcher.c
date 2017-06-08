@@ -17,19 +17,24 @@ GNU General Public License for more details.
 
 #include <stdlib.h>
 #include <string.h>
+#ifdef XASH_SDLMAIN
+#include "SDL.h"
+#endif
+
 char szGameDir[128]; // safe place to keep gamedir
-int szArgc;
+int g_iArgc;
 
 void Host_Shutdown( void );
+int Host_Main( int szArgc, char **szArgv, const char *szGameDir, int chg, void *callback );
 
-char **szArgv;
+char **g_pszArgv;
 
-
+void Launcher_ChangeGame( const char *progname );
 void Launcher_ChangeGame( const char *progname )
 {
 	strncpy( szGameDir, progname, sizeof( szGameDir ) - 1 );
 	Host_Shutdown( );
-	exit( Host_Main( szArgc, szArgv, szGameDir, 1, &Launcher_ChangeGame ) );
+	exit( Host_Main( g_iArgc, g_pszArgv, szGameDir, 1, &Launcher_ChangeGame ) );
 }
 #ifdef XASH_NOCONHOST
 #include <windows.h>
@@ -52,12 +57,33 @@ int __stdcall WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR cmdLine, int n
 #endif
 int main( int argc, char** argv )
 {
+	char gamedir_buf[32] = "";
 	const char *gamedir = getenv("XASH3D_GAMEDIR");
+
 	if(!gamedir)
 		gamedir = "valve";
-	szArgc = argc;
-	szArgv = argv;
-	return Host_Main( argc, argv, gamedir, 0, &Launcher_ChangeGame );
+	else
+	{
+		strncpy( gamedir_buf, gamedir, 32 );
+		gamedir = gamedir_buf;
+	}
+
+#ifdef __EMSCRIPTEN__
+	// For some unknown reason emscripten refusing to load libraries later
+	Com_LoadLibrary("menu", 0 );
+	Com_LoadLibrary("server", 0 );
+	Com_LoadLibrary("client", 0 );
+#endif
+
+	g_iArgc = argc;
+	g_pszArgv = argv;
+#if TARGET_OS_IPHONE
+	{
+		void IOS_LaunchDialog( void );
+		IOS_LaunchDialog();
+	}
+#endif
+	return Host_Main( g_iArgc, g_pszArgv, gamedir, 0, &Launcher_ChangeGame );
 }
 
 #endif

@@ -8,6 +8,11 @@
 
 #ifndef XASH_SKIPCRTLIB
 #ifdef XASH_FASTSTR
+
+// align checks
+#define ALIGNOF(x) ( ( unsigned long int )(x) & ( sizeof( int ) - 1) )
+#define IS_UNALIGNED(x) (ALIGNOF(x) != 0)
+#define HAS_NULL(x) ( ( ( x - lomagic ) & himagic ) != 0 )
 xash_force_inline int Q_strlen( const char *string )
 {
 	register const char	*pchr = string;
@@ -132,10 +137,10 @@ xash_force_inline size_t Q_strncpy( char *dst, const char *src, size_t size )
 	for( ; IS_UNALIGNED(pchr); pchr++, len++, dst++ )
 	{
 		*dst = *pchr;
-		if( len >= size )
+		if( len >= size - 1 )
 		{
 			*dst = '\0';
-			return len;
+			return len + Q_strlen(pchr);
 		}
 		
 		if( *pchr == '\0' )
@@ -152,7 +157,7 @@ xash_force_inline size_t Q_strncpy( char *dst, const char *src, size_t size )
 		register unsigned int longword = *plongword++;
 
 		// if magic check failed
-		if( HAS_NULL(longword) || (size - len < 4) )
+		if( HAS_NULL(longword) || (size - len <= 4) )
 		{
 			const char *pchar = ( const char * )( plongword - 1 );
 			char *pchdst = ( char * )( pdst );
@@ -163,10 +168,10 @@ xash_force_inline size_t Q_strncpy( char *dst, const char *src, size_t size )
 			{
 				pchdst[i] = pchar[i];
 
-				if( len + i >= size )
+				if( len + i >= size - 1 )
 				{
 					pchdst[i] = '\0';
-					return len + i;
+					return len + i + Q_strlen(pchar + i);
 				}
 				if( pchar[i] == 0 )
 					return len + i;

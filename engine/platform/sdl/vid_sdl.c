@@ -13,15 +13,15 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#ifndef XASH_DEDICATED
-#ifndef XASH_NANOGL
-
 #include "common.h"
+#if XASH_VIDEO == VIDEO_SDL
 #include "client.h"
 #include "gl_local.h"
 #include "mod_local.h"
 #include "input.h"
 #include "gl_vidnt.h"
+
+
 
 #if (defined(_WIN32) && defined(XASH_SDL))
 #include <SDL_syswm.h>
@@ -30,6 +30,11 @@ GNU General Public License for more details.
 #ifdef XASH_X11
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#endif
+
+#ifdef WIN32
+// Enable NVIDIA High Performance Graphics while using Integrated Graphics.
+__declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 #endif
 
 
@@ -649,13 +654,11 @@ void GL_InitExtensions( void )
 		glConfig.texRectangle = GL_TEXTURE_RECTANGLE_NV;
 		pglGetIntegerv( GL_MAX_RECTANGLE_TEXTURE_SIZE_NV, &glConfig.max_2d_rectangle_size );
 	}
-#ifndef __ANDROID__
 	else if( Q_strstr( glConfig.extensions_string, "GL_EXT_texture_rectangle" ))
 	{
 		glConfig.texRectangle = GL_TEXTURE_RECTANGLE_EXT;
 		pglGetIntegerv( GL_MAX_RECTANGLE_TEXTURE_SIZE_EXT, &glConfig.max_2d_rectangle_size );
 	}
-#endif
 	else glConfig.texRectangle = glConfig.max_2d_rectangle_size = 0; // no rectangle
 
 	glConfig.max_2d_texture_size = 0;
@@ -756,7 +759,7 @@ Window* NetClientList(Display* display, unsigned long *len)
 	Window* windowList;
 	Atom type;
 	int form, errno;
-	unsigned int remain;
+	unsigned long remain;
 
 	errno = XGetWindowProperty(
 		display,
@@ -785,7 +788,7 @@ char* WindowClassName(Display* display, Window window)
 {
 	char* className;
 	Atom type;
-	unsigned int len, remain;
+	unsigned long len, remain;
 	int form, errno;
 	errno = XGetWindowProperty(
 		display,
@@ -825,7 +828,7 @@ uint VID_EnumerateInstances( void )
 	Display* display = XOpenDisplay(NULL);
 	Window* winlist;
 	char* name;
-	unsigned int len;
+	unsigned long len;
 	int i;
 
 	if(!display)
@@ -962,19 +965,166 @@ void VID_RestoreGamma( void )
 #endif
 }
 
+void R_ChangeDisplaySettingsFast( int width, int height );
+
+void *SDL_GetVideoDevice( void );
+
+#ifdef _WIN32
+#define XASH_SDL_WINDOW_RECREATE
+#elif defined XASH_X11
+#define XASH_SDL_USE_FAKEWND
+#endif
 
 
+#ifdef XASH_SDL_USE_FAKEWND
+
+SDL_Window *fakewnd;
+
+qboolean VID_SetScreenResolution( int width, int height )
+{
+	SDL_DisplayMode want, got;
+
+	want.w = width;
+	want.h = height;
+	want.driverdata = NULL;
+	want.format = want.refresh_rate = 0; // don't care
+
+	if( !SDL_GetClosestDisplayMode(0, &want, &got) )
+		return false;
+
+	MsgDev(D_NOTE, "Got closest display mode: %ix%i@%i\n", got.w, got.h, got.refresh_rate);
+
+	if( fakewnd )
+		SDL_DestroyWindow( fakewnd );
+
+	fakewnd = SDL_CreateWindow("fakewnd", SDL_WINDOWPOS_CENTERED,
+		SDL_WINDOWPOS_CENTERED, got.h, got.w, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_INPUT_GRABBED | SDL_WINDOW_FULLSCREEN );
+
+	if( !fakewnd )
+		return false;
+
+	if( SDL_SetWindowDisplayMode( fakewnd, &got) == -1 )
+		return false;
+
+	//SDL_ShowWindow( fakewnd );
+	if( SDL_SetWindowFullscreen( fakewnd, SDL_WINDOW_FULLSCREEN) == -1 )
+		return false;
+	SDL_SetWindowBordered( host.hWnd, SDL_FALSE );
+	SDL_SetWindowPosition( host.hWnd, 0, 0 );
+	SDL_SetWindowGrab( host.hWnd, SDL_TRUE );
+	SDL_HideWindow( host.hWnd );
+	SDL_ShowWindow( host.hWnd );
+	SDL_SetWindowSize( host.hWnd, got.w, got.h );
+
+	SDL_GL_GetDrawableSize( host.hWnd, &got.w, &got.h );
+
+	R_ChangeDisplaySettingsFast( got.w, got.h );
+	SDL_HideWindow( fakewnd );
+	return true;
+}
+
+void VID_RestoreScreenResolution( void )
+{
+	if( fakewnd )
+	{
+
+		SDL_ShowWindow( fakewnd );
+		SDL_DestroyWindow( fakewnd );
+	}
+	fakewnd = NULL;
+	if( !Cvar_VariableInteger("fullscreen") )
+	{
+		SDL_SetWindowBordered( host.hWnd, SDL_TRUE );
+		//SDL_SetWindowPosition( host.hWnd, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED  );
+		SDL_SetWindowGrab( host.hWnd, SDL_FALSE );
+	}
+	else
+	{
+		SDL_MinimizeWindow( host.hWnd );
+	}
+}
+#else
+static qboolean recreate = false;
+qboolean VID_SetScreenResolution( int width, int height )
+{
+	SDL_DisplayMode want, got;
+	Uint32 wndFlags = 0;
+	static string wndname;
+
+	if( vid_highdpi->integer ) wndFlags |= SDL_WINDOW_ALLOW_HIGHDPI;
+	Q_strncpy( wndname, GI->title, sizeof( wndname ));
+
+	want.w = width;
+	want.h = height;
+	want.driverdata = NULL;
+	want.format = want.refresh_rate = 0; // don't care
+
+	if( !SDL_GetClosestDisplayMode(0, &want, &got) )
+		return false;
+
+	MsgDev(D_NOTE, "Got closest display mode: %ix%i@%i\n", got.w, got.h, got.refresh_rate);
+
+#ifdef XASH_SDL_WINDOW_RECREATE
+	if( recreate )
+	{
+	SDL_DestroyWindow( host.hWnd );
+	host.hWnd = SDL_CreateWindow(wndname, 0, 0, width, height, wndFlags | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_INPUT_GRABBED );
+	SDL_GL_MakeCurrent( host.hWnd, glw_state.context );
+	recreate = false;
+	}
+#endif
+
+	if( SDL_SetWindowDisplayMode( host.hWnd, &got) == -1 )
+		return false;
+
+	if( SDL_SetWindowFullscreen( host.hWnd, SDL_WINDOW_FULLSCREEN) == -1 )
+		return false;
+	SDL_SetWindowBordered( host.hWnd, SDL_FALSE );
+	SDL_SetWindowPosition( host.hWnd, 0, 0 );
+	SDL_SetWindowGrab( host.hWnd, SDL_TRUE );
+	SDL_SetWindowSize( host.hWnd, got.w, got.h );
+
+	SDL_GL_GetDrawableSize( host.hWnd, &got.w, &got.h );
+
+	R_ChangeDisplaySettingsFast( got.w, got.h );
+	return true;
+}
+
+void VID_RestoreScreenResolution( void )
+{
+	if( !Cvar_VariableInteger("fullscreen") )
+	{
+		SDL_SetWindowBordered( host.hWnd, SDL_TRUE );
+		SDL_SetWindowPosition( host.hWnd, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED  );
+		SDL_SetWindowGrab( host.hWnd, SDL_FALSE );
+	}
+	else
+	{
+		SDL_MinimizeWindow( host.hWnd );
+		SDL_SetWindowFullscreen( host.hWnd, 0 );
+		recreate = true;
+	}
+}
+#endif
 
 qboolean VID_CreateWindow( int width, int height, qboolean fullscreen )
 {
 #ifdef XASH_SDL
 	static string	wndname;
-	Uint32 wndFlags = SDL_WINDOW_MOUSE_FOCUS | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+	Uint32 wndFlags = 0;
 
+	if( vid_highdpi->integer ) wndFlags |= SDL_WINDOW_ALLOW_HIGHDPI;
 	Q_strncpy( wndname, GI->title, sizeof( wndname ));
 
+	if( !fullscreen )
 	host.hWnd = SDL_CreateWindow(wndname, r_xpos->integer,
-		r_ypos->integer, width, height, wndFlags);
+		r_ypos->integer, width, height, wndFlags | SDL_WINDOW_MOUSE_FOCUS | SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE );
+	else
+	{
+		host.hWnd = SDL_CreateWindow(wndname, 0, 0, width, height, wndFlags | SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_INPUT_GRABBED );
+		SDL_SetWindowFullscreen( host.hWnd, SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS );
+	}
+
 
 	if( !host.hWnd )
 	{
@@ -995,25 +1145,12 @@ qboolean VID_CreateWindow( int width, int height, qboolean fullscreen )
 
 	if( fullscreen )
 	{
-		SDL_DisplayMode want, got;
-
-		want.w = width;
-		want.h = height;
-		want.driverdata = NULL;
-		want.format = want.refresh_rate = 0; // don't care
-
-		if( !SDL_GetClosestDisplayMode(0, &want, &got) )
-			return false;
-
-		MsgDev(D_NOTE, "Got closest display mode: %ix%i@%i\n", got.w, got.h, got.refresh_rate);
-
-		if( SDL_SetWindowDisplayMode(host.hWnd, &got) == -1 )
-			return false;
-
-		if( SDL_SetWindowFullscreen(host.hWnd, SDL_WINDOW_FULLSCREEN) == -1 )
+		if( !VID_SetScreenResolution( width, height ) )
 			return false;
 
 	}
+	else
+		VID_RestoreScreenResolution();
 
 	host.window_center_x = width / 2;
 	host.window_center_y = height / 2;
@@ -1041,7 +1178,7 @@ qboolean VID_CreateWindow( int width, int height, qboolean fullscreen )
 		if( SDL_GetWindowWMInfo( host.hWnd, &info ) )
 		{
 			// info.info.info.info.info... Holy shit, SDL?
-			SetClassLong( info.info.win.window, GCL_HICON, ico );
+			SetClassLong( info.info.win.window, GCL_HICON, (LONG)ico );
 		}
 	}
 #endif
@@ -1078,6 +1215,7 @@ void VID_DestroyWindow( void )
 		glw_state.context = NULL;
 	}
 
+	VID_RestoreScreenResolution();
 	if( host.hWnd )
 	{
 		SDL_DestroyWindow ( host.hWnd );
@@ -1104,15 +1242,21 @@ void R_ChangeDisplaySettingsFast( int width, int height )
 	Cvar_SetFloat("width", width);
 	Cvar_SetFloat("height", height);
 
-	glState.width = width;
-	glState.height = height;
-	if( width * 3 != height * 4 && width * 4 != height * 5 )
-		glState.wideScreen = true;
-	else glState.wideScreen = false;
+	if( glState.width != width || glState.height != height )
+	{
+		glState.width = width;
+		glState.height = height;
+		if( width * 3 != height * 4 && width * 4 != height * 5 )
+			glState.wideScreen = true;
+		else glState.wideScreen = false;
 
-	SCR_VidInit();
+		// as we don't recreate window here, update center positions by hand
+		host.window_center_x = width / 2;
+		host.window_center_y = height / 2;
+
+		SCR_VidInit();
+	}
 }
-
 
 rserr_t R_ChangeDisplaySettings( int width, int height, qboolean fullscreen )
 {
@@ -1143,35 +1287,16 @@ rserr_t R_ChangeDisplaySettings( int width, int height, qboolean fullscreen )
 	}
 	else if( fullscreen )
 	{
-		SDL_DisplayMode want, got;
-
-		want.w = width;
-		want.h = height;
-		want.driverdata = NULL;
-		want.format = want.refresh_rate = 0; // don't care
-
-		if( !SDL_GetClosestDisplayMode(0, &want, &got) )
-			return rserr_invalid_mode;
-
-		MsgDev(D_NOTE, "Got closest display mode: %ix%i@%i\n", got.w, got.h, got.refresh_rate);
-
-		if( ( SDL_GetWindowFlags(host.hWnd) & SDL_WINDOW_FULLSCREEN ) == SDL_WINDOW_FULLSCREEN)
-			if( SDL_SetWindowFullscreen(host.hWnd, 0) == -1 )
-				return rserr_invalid_fullscreen;
-
-		if( SDL_SetWindowDisplayMode(host.hWnd, &got) )
-			return rserr_invalid_mode;
-
-		if( SDL_SetWindowFullscreen(host.hWnd, SDL_WINDOW_FULLSCREEN) == -1 )
+		if( !VID_SetScreenResolution( width, height ) )
 			return rserr_invalid_fullscreen;
-
-		R_ChangeDisplaySettingsFast( got.w, got.h );
 	}
 	else
 	{
+		VID_RestoreScreenResolution();
 		if( SDL_SetWindowFullscreen(host.hWnd, 0) )
 			return rserr_invalid_fullscreen;
 		SDL_SetWindowSize(host.hWnd, width, height);
+		SDL_GL_GetDrawableSize( host.hWnd, &width, &height );
 		R_ChangeDisplaySettingsFast( width, height );
 	}
 #endif // XASH_SDL
@@ -1228,6 +1353,7 @@ qboolean VID_SetMode( void )
 		{
 			Cvar_SetFloat( "fullscreen", 0 );
 			MsgDev( D_ERROR, "VID_SetMode: fullscreen unavailable in this mode\n" );
+			Sys_Warn("fullscreen unavailable in this mode!");
 			if(( err = R_ChangeDisplaySettings( iScreenWidth, iScreenHeight, false )) == rserr_ok )
 				return true;
 		}
@@ -1235,12 +1361,14 @@ qboolean VID_SetMode( void )
 		{
 			Cvar_SetFloat( "vid_mode", glConfig.prev_mode );
 			MsgDev( D_ERROR, "VID_SetMode: invalid mode\n" );
+			Sys_Warn("invalid mode");
 		}
 
 		// try setting it back to something safe
 		if(( err = R_ChangeDisplaySettings( glConfig.prev_width, glConfig.prev_height, false )) != rserr_ok )
 		{
 			MsgDev( D_ERROR, "VID_SetMode: could not revert to safe mode\n" );
+			Sys_Warn("could not revert to safe mode!");
 			return false;
 		}
 	}
@@ -1288,5 +1416,4 @@ void R_Free_OpenGL( void )
 	Q_memset( glConfig.extension, 0, sizeof( glConfig.extension[0] ) * GL_EXTCOUNT );
 	glw_state.initialized = false;
 }
-#endif //XASH3D_NANOGL
-#endif // XASH_DEDICATED
+#endif //XASH_VIDEO

@@ -22,10 +22,30 @@ extern "C" {
 
 #include "port.h"
 
-#ifndef _WIN32
-#ifdef __linux__
-#include <linux/limits.h> // PATH_MAX
+#include "backends.h"
+#include "defaults.h"
+//
+// check if selected backend not allowed
+//
+#if XASH_TIMER == TIMER_NULL
+	#error "Please select timer backend"
 #endif
+
+#ifndef XASH_DEDICATED
+	#if XASH_VIDEO == VIDEO_NULL
+		#error "Please select video backend"
+	#endif
+#endif
+
+#ifndef XASH_SDL
+
+#if XASH_TIMER == TIMER_SDL || XASH_VIDEO == VIDEO_SDL || XASH_SOUND == SOUND_SDL || XASH_INPUT == INPUT_SDL
+#error "SDL backends without XASH_SDL not allowed"
+#endif
+
+#endif
+
+#ifndef _WIN32
 #include <stddef.h> // size_t
 #include <stdio.h> // off_t
 #include <stdarg.h> // va_list
@@ -62,6 +82,12 @@ extern "C" {
 #define xash_force_inline _inline
 #else
 #define xash_force_inline
+#endif
+
+#if defined __i386__ &&  defined __GNUC__
+#define GAME_EXPORT __attribute__((force_align_arg_pointer))
+#else
+#define GAME_EXPORT
 #endif
 
 typedef unsigned int	dword;
@@ -107,9 +133,9 @@ typedef enum
 #include "com_model.h"
 #include "crtlib.h"
 
-#define XASH_VERSION	"0.18.1"		// engine current version
+#define XASH_VERSION	"0.19"		// engine current version
 // since this fork have own version, this is just left for compability
-#define BASED_VERSION	0.97f
+#define BASED_VERSION	0.98f
 
 // PERFORMANCE INFO
 #define MIN_FPS         	15.0		// host minimum fps value for maxfps.
@@ -146,6 +172,8 @@ typedef enum
 #define GI              SI.GameInfo
 #define FS_Gamedir()	SI.GameInfo->gamedir
 #define FS_Title()		SI.GameInfo->title
+
+#define FORCE_DRAW_VERSION_TIME 5.0f // draw version for 5 seconds
 
 #ifdef _DEBUG
 void DBG_AssertFunction( qboolean fExpr, const char* szExpr, const char* szFile, int szLine, const char* szMessage );
@@ -226,6 +254,7 @@ typedef struct gameinfo_s
 	int		max_tents;	// min temp ents is 300, max is 2048
 	int		max_beams;	// min beams is 64, max beams is 512
 	int		max_particles;	// min particles is 4096, max particles is 32768
+	qboolean	added;
 } gameinfo_t;
 
 typedef struct sysinfo_s
@@ -298,6 +327,7 @@ typedef struct host_redirect_s
 	int		buffersize;
 	netadr_t		address;
 	void		(*flush)( netadr_t adr, rdtype_t target, char *buffer );
+	int lines;
 } host_redirect_t;
 
 typedef struct
@@ -358,6 +388,8 @@ typedef struct host_parm_s
 	qboolean		force_draw_version;	// used when fraps is loaded
 	qboolean		write_to_clipboard;	// put image to clipboard instead of disk
 	qboolean		crashed;		// set to true if crashed
+	qboolean		skip_configs;	// skip config save during Host_Shutdown
+	double	force_draw_version_time; // time when disable force_draw_version
 
 	char		rootdir[256];	// member root directory
 	char		gamefolder[64];	// it's a default gamefolder	
@@ -397,6 +429,7 @@ void FS_AddGameDirectory( const char *dir, int flags );
 void FS_AddGameHierarchy( const char *dir, int flags );
 void FS_LoadGameInfo( const char *rootfolder );
 void FS_FileBase( const char *in, char *out );
+void FS_MapFileBase( const char *in, char *out );
 const char *FS_FileExtension( const char *in );
 void FS_DefaultExtension( char *path, const char *extension );
 void FS_ExtractFilePath( const char *path, char* dest );
@@ -497,6 +530,18 @@ typedef enum
 	IL_DDS_HARDWARE = BIT(4), // DXT compression is support
 } ilFlags_t;
 
+// goes into rgbdata_t->encode
+#define DXT_ENCODE_DEFAULT		0	// don't use custom encoders
+#define DXT_ENCODE_COLOR_YCoCg	0x1A01	// make sure that value dosn't collide with anything
+#define DXT_ENCODE_ALPHA_1BIT		0x1A02	// normal 1-bit alpha
+#define DXT_ENCODE_ALPHA_8BIT		0x1A03	// normal 8-bit alpha
+#define DXT_ENCODE_ALPHA_SDF		0x1A04	// signed distance field
+#define DXT_ENCODE_NORMAL_AG_ORTHO	0x1A05	// orthographic projection
+#define DXT_ENCODE_NORMAL_AG_STEREO	0x1A06	// stereographic projection
+#define DXT_ENCODE_NORMAL_AG_PARABOLOID	0x1A07	// paraboloid projection
+#define DXT_ENCODE_NORMAL_AG_QUARTIC	0x1A08	// newton method
+#define DXT_ENCODE_NORMAL_AG_AZIMUTHAL	0x1A09	// Lambert Azimuthal Equal-Area
+
 // rgbdata output flags
 typedef enum
 {
@@ -544,6 +589,7 @@ typedef struct rgbdata_s
 	word	depth;		// image depth
 	uint	type;		// compression type
 	uint	flags;		// misc image flags
+	word	encode;
 	byte	numMips;	// mipmap count
 	byte	*palette;		// palette if present
 	byte	*buffer;		// image buffer
@@ -700,6 +746,7 @@ CLIENT / SERVER SYSTEMS
 void CL_Init( void );
 void CL_Shutdown( void );
 void Host_ClientFrame( void );
+void Host_RenderFrame( void );
 qboolean CL_Active( void );
 
 void SV_Init( void );
@@ -765,7 +812,7 @@ void CRC32_ProcessBuffer( dword *pulCRC, const void *pBuffer, int nBuffer );
 void CRC32_ProcessByte( dword *pulCRC, byte ch );
 void CRC32_Final( dword *pulCRC );
 qboolean CRC32_File( dword *crcvalue, const char *filename );
-qboolean CRC32_MapFile( dword *crcvalue, const char *filename );
+qboolean CRC32_MapFile( dword *crcvalue, const char *filename, qboolean multiplayer );
 void MD5Init( MD5Context_t *ctx );
 void MD5Update( MD5Context_t *ctx, const byte *buf, uint len );
 void MD5Final( byte digest[16], MD5Context_t *ctx );
@@ -782,6 +829,13 @@ void HPAK_AddLump( qboolean queue, const char *filename, struct resource_s *pRes
 void HPAK_CheckIntegrity( const char *filename );
 void HPAK_CheckSize( const char *filename );
 void HPAK_FlushHostQueue( void );
+
+//
+// identification.c
+//
+void ID_Init( void );
+const char *ID_GetMD5( void );
+void GAME_EXPORT ID_SetCustomClientID( const char *id );
 
 //
 // keys.c
@@ -834,6 +888,11 @@ struct pmtrace_s;
 //
 // input.c
 //
+
+#define INPUT_DEVICE_MOUSE (1<<0)
+#define INPUT_DEVICE_TOUCH (1<<1)
+#define INPUT_DEVICE_JOYSTICK (1<<2)
+#define INPUT_DEVICE_VR (1<<3)
 
 void IN_EngineAppendMove( float frametime, usercmd_t *cmd, qboolean active );
 //void IN_JoyAppendMove( usercmd_t *cmd, float forwardmove, float sidemove );
@@ -902,6 +961,7 @@ int SCR_GetAudioChunk( char *rawdata, int length );
 wavdata_t *SCR_GetMovieInfo( void );
 void SCR_Shutdown( void );
 void Con_Print( const char *txt );
+void Rcon_Print( const char *pMsg );
 void Con_NPrintf( int idx, char *fmt, ... ) _format(2);
 void Con_NXPrintf( struct con_nprint_s *info, char *fmt, ... ) _format(2);
 void UI_NPrintf( int idx, char *fmt, ... ) _format(2);
@@ -909,7 +969,7 @@ void UI_NXPrintf( struct con_nprint_s *info, char *fmt, ... ) _format(2);
 char *Info_ValueForKey( const char *s, const char *key );
 void Info_RemovePrefixedKeys( char *start, char prefix );
 qboolean Info_RemoveKey( char *s, const char *key );
-qboolean Info_SetValueForKey( char *s, const char *key, const char *value );
+qboolean Info_SetValueForKey( char *s, const char *key, const char *value, size_t maxsize );
 qboolean Info_SetValueForStarKey( char *s, const char *key, const char *value, int maxsize );
 qboolean Info_Validate( const char *s );
 void Info_Print( const char *s );
@@ -940,6 +1000,7 @@ void HTTP_ResetProcessState ( void );
 void HTTP_Init( void );
 void HTTP_Shutdown( void );
 void HTTP_Run( void );
+void HTTP_ClearCustomServers( void );
 void CL_ProcessFile( qboolean successfully_received, const char *filename );
 
 typedef struct autocomplete_list_s
@@ -960,6 +1021,11 @@ typedef struct
 
 void Con_CompleteCommand( field_t *field );
 void Con_ClearAutoComplete();
+
+//
+// console.c
+//
+void Con_Clear( void );
 
 extern const char *svc_strings[256];
 

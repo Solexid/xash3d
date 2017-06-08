@@ -101,17 +101,26 @@ GNU General Public License for more details.
 #define MakeRGBA( out, x, y, z, w ) Vector4Set( out, x, y, z, w )
 #define PlaneDist(point,plane) ((plane)->type < 3 ? (point)[(plane)->type] : DotProduct((point), (plane)->normal))
 #define PlaneDiff(point,plane) (((plane)->type < 3 ? (point)[(plane)->type] : DotProduct((point), (plane)->normal)) - (plane)->dist)
-#define bound( min, num, max ) ((num) >= (min) ? ((num) < (max) ? (num) : (max)) : (min))
+#define boundmax( num, high ) ( (num) < (high) ? (num) : (high) )
+#define boundmin( num, low )  ( (num) >= (low) ? (num) : (low)  )
+#define bound( low, num, high ) ( boundmin( boundmax(num, high), low ))
+//#define bound( min, num, max ) ((num) >= (min) ? ((num) < (max) ? (num) : (max)) : (min))
 
 float rsqrt( float number );
 float anglemod( const float a );
+word FloatToHalf( float v );
+float HalfToFloat( word h );
 int SignbitsForPlane( const vec3_t normal );
 int NearestPOW( int value, qboolean roundDown );
 void SinCos( float radians, float *sine, float *cosine );
 #ifdef VECTORIZE_SINCOS
 void SinCosFastVector(float r1, float r2, float r3, float r4,
 					  float *s0, float *s1, float *s2, float *s3,
-					  float *c0, float *c1, float *c2, float *c3);
+					  float *c0, float *c1, float *c2, float *c3)
+#if defined(__GNUC__)
+	__attribute__((nonnull(5, 6, 7, 9, 10, 11)))
+#endif
+;
 #endif
 float VectorNormalizeLength2( const vec3_t v, vec3_t out );
 void VectorVectors( const vec3_t forward, vec3_t right, vec3_t up );
@@ -130,6 +139,7 @@ void AngleQuaternion( const vec3_t angles, vec4_t q );
 void QuaternionSlerp( const vec4_t p, vec4_t q, float t, vec4_t qt );
 float RemapVal( float val, float A, float B, float C, float D );
 float ApproachVal( float target, float value, float speed );
+void InterpolateAngles( vec3_t start, vec3_t end, vec3_t output, float frac );
 
 //
 // matrixlib.c

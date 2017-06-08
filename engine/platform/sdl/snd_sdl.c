@@ -13,15 +13,13 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#ifndef XASH_DEDICATED
-#ifndef XASH_OPENSL
-
-#include "port.h"
 #include "common.h"
+#if XASH_SOUND == SOUND_SDL
+
 #include "sound.h"
-#ifdef XASH_SDL
+
 #include <SDL.h>
-#endif
+
 #define SAMPLE_16BIT_SHIFT		1
 #define SECONDARY_BUFFER_SIZE		0x10000
 
@@ -31,14 +29,14 @@ Global variables. Must be visible to window-procedure function
 so it can unlock and free the data block after it has been played.
 =======================================================================
 */
-convar_t		*s_primary;
-convar_t		*s_khz;
-dma_t			dma;
+extern convar_t		*s_primary;
+extern dma_t			dma;
+
+static int sdl_dev;
 
 //static qboolean	snd_firsttime = true;
 //static qboolean	primary_format_set;
 
-#ifdef XASH_SDL
 void SDL_SoundCallback( void* userdata, Uint8* stream, int len)
 {
 	int size = dma.samples << 1;
@@ -67,39 +65,24 @@ Returns false if nothing is found.
 qboolean SNDDMA_Init( void *hInst )
 {
 	SDL_AudioSpec desired, obtained;
-	int ret = 0;
 
-	if (SDL_WasInit(SDL_INIT_AUDIO) == 0)
-		ret = SDL_InitSubSystem(SDL_INIT_AUDIO);
-	if (ret == -1) {
-		Con_Printf("Couldn't initialize SDL audio: %s\n", SDL_GetError());
+	if( SDL_Init( SDL_INIT_AUDIO ) )
+	{
+		MsgDev( D_ERROR, "Audio: SDL: %s \n", SDL_GetError() );
 		return false;
 	}
 
 	Q_memset(&desired, 0, sizeof(desired));
-	switch (s_khz->integer)
-	{
-	case 44:
-		desired.freq = SOUND_44k;
-		break;
-	case 32:
-		desired.freq = SOUND_32k;
-		break;
-	case 22:
-		desired.freq = SOUND_22k;
-		break;
-	default:
-		desired.freq = SOUND_11k;
-		break;
-	}
-
+	desired.freq = SOUND_DMA_SPEED;
 	desired.format = AUDIO_S16LSB;
 	desired.samples = 1024;
 	desired.channels = 2;
 	desired.callback = SDL_SoundCallback;
-	ret = SDL_OpenAudio(&desired, &obtained);
-	if (ret == -1) {
-		Con_Printf("Couldn't open SDL audio: %s\n", SDL_GetError());
+
+	sdl_dev = SDL_OpenAudioDevice( NULL, 0, &desired, &obtained, 0 );
+
+	if( !sdl_dev ) {
+		Con_Printf( "Couldn't open SDL audio: %s\n", SDL_GetError() );
 		return false;
 	}
 
@@ -123,7 +106,7 @@ qboolean SNDDMA_Init( void *hInst )
 
 	Con_Printf("Using SDL audio driver: %s @ %d Hz\n", SDL_GetCurrentAudioDriver(), obtained.freq);
 
-	SDL_PauseAudio(0);
+	SDL_PauseAudioDevice( sdl_dev, 0 );
 
 	dma.initialized = true;
 	return true;
@@ -132,12 +115,7 @@ fail:
 	SNDDMA_Shutdown();
 	return false;
 }
-#else
-qboolean SNDDMA_Init( void *hInst )
-{
-	return false;
-}
-#endif
+
 /*
 ==============
 SNDDMA_GetDMAPos
@@ -198,9 +176,7 @@ Makes sure dma.buffer is valid
 */
 void SNDDMA_BeginPainting( void )
 {
-#ifdef XASH_SDL
 	SDL_LockAudio();
-#endif
 }
 
 /*
@@ -213,9 +189,7 @@ Also unlocks the dsound buffer
 */
 void SNDDMA_Submit( void )
 {
-#ifdef XASH_SDL
 	SDL_UnlockAudio();
-#endif
 }
 
 /*
@@ -227,15 +201,24 @@ Reset the sound device for exiting
 */
 void SNDDMA_Shutdown( void )
 {
-	Con_Printf("Shutting down audio.\n");
+	Con_Printf( "Shutting down audio.\n" );
 	dma.initialized = false;
-#ifdef XASH_SDL
-	SDL_CloseAudio();
-	if (SDL_WasInit(SDL_INIT_AUDIO != 0))
-		 SDL_QuitSubSystem(SDL_INIT_AUDIO);
+
+	if( sdl_dev )
+	{
+		SDL_PauseAudioDevice( sdl_dev, 1 );
+#ifndef __EMSCRIPTEN__
+		SDL_CloseAudioDevice( sdl_dev );
 #endif
-	if (dma.buffer) {
-		 Z_Free(dma.buffer);
+		SDL_CloseAudio();
+	}
+
+	if( SDL_WasInit( SDL_INIT_AUDIO ) )
+		 SDL_QuitSubSystem( SDL_INIT_AUDIO );
+
+	if( dma.buffer )
+	{
+		 Mem_Free( dma.buffer );
 		 dma.buffer = NULL;
 	}
 }
@@ -247,9 +230,7 @@ S_PrintDeviceName
 */
 void S_PrintDeviceName( void )
 {
-#ifdef XASH_SDL
 	Msg( "Audio: SDL (driver: %s)\n", SDL_GetCurrentAudioDriver() );
-#endif
 }
 
 
@@ -264,8 +245,7 @@ between a deactivate and an activate.
 void S_Activate( qboolean active )
 {
 #ifdef XASH_SDL
-	SDL_PauseAudio( !active );
+	SDL_PauseAudioDevice( sdl_dev, !active );
 #endif
 }
 #endif
-#endif // XASH_DEDICATED

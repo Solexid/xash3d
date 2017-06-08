@@ -119,7 +119,6 @@ static void UI_LanGame_GetGamesList( void )
 	{
 		if( i >= UI_MAX_SERVERS ) break;
 		info = uiStatic.serverNames[i];
-
 		uiLanGame.gameDescription[i][0] = 0; // mark this string as empty
 
 		StringConcat( uiLanGame.gameDescription[i], Info_ValueForKey( info, "host" ), QMSB_GAME_LENGTH );

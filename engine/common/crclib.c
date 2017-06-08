@@ -89,7 +89,7 @@ static const dword crc32table[NUM_BYTES] =
 0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
 };
 
-void CRC32_Init( dword *pulCRC )
+void GAME_EXPORT CRC32_Init( dword *pulCRC )
 {
 	*pulCRC = CRC32_INIT_VALUE;
 }
@@ -99,7 +99,7 @@ void CRC32_Final( dword *pulCRC )
 	*pulCRC ^= CRC32_XOR_VALUE;
 }
 
-void CRC32_ProcessByte( dword *pulCRC, byte ch )
+void GAME_EXPORT CRC32_ProcessByte( dword *pulCRC, byte ch )
 {
 	dword	ulCrc = *pulCRC;
 
@@ -108,7 +108,7 @@ void CRC32_ProcessByte( dword *pulCRC, byte ch )
 	*pulCRC = ulCrc;
 }
 
-void CRC32_ProcessBuffer( dword *pulCRC, const void *pBuffer, int nBuffer )
+void GAME_EXPORT CRC32_ProcessBuffer( dword *pulCRC, const void *pBuffer, int nBuffer )
 {
 	dword	poolpb, ulCrc = *pulCRC;
 	byte	*pb = (byte *)pBuffer;
@@ -230,7 +230,7 @@ qboolean CRC32_File( dword *crcvalue, const char *filename )
 	return true;
 }
 
-qboolean CRC32_MapFile( dword *crcvalue, const char *filename )
+qboolean CRC32_MapFile( dword *crcvalue, const char *filename, qboolean multiplayer )
 {
 	file_t	*f;
 	dheader_t	*header;
@@ -244,7 +244,7 @@ qboolean CRC32_MapFile( dword *crcvalue, const char *filename )
 
 #ifndef XASH_DEDICATED
 	// always calc same checksum for singleplayer
-	if( cls.state >= ca_connected && SV_Active() && CL_GetMaxClients() == 1 )
+	if( multiplayer == false )
 	{
 		*crcvalue = (('H'<<24)+('S'<<16)+('A'<<8)+'X');
 		return true;
@@ -436,7 +436,7 @@ void MD5Final( byte digest[16], MD5Context_t *ctx )
 
 	MD5Transform( ctx->buf, (uint *)ctx->in );
 	Q_memcpy( digest, ctx->buf, 16 );
-	Q_memset( ctx, 0, sizeof( ctx ));	// in case it's sensitive
+	Q_memset( ctx, 0, sizeof( *ctx ));	// in case it's sensitive
 }
 
 // The four core functions

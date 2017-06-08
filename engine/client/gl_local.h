@@ -16,8 +16,6 @@ GNU General Public License for more details.
 #ifndef GL_LOCAL_H
 #define GL_LOCAL_H
 
-#include "port.h"
-
 #ifdef XASH_SDL
 #include <SDL_video.h>
 #endif
@@ -75,6 +73,7 @@ typedef struct gltexture_s
 	GLuint		target;		// glTarget
 	GLuint		texnum;		// gl texture binding
 	GLint		format;		// uploaded format
+	GLint		encode;		// using GLSL decoder
 	texFlags_t	flags;
 
 	rgba_t		fogParams;	// some water textures
@@ -664,6 +663,9 @@ extern convar_t	*gl_nosort;
 extern convar_t	*gl_clear;
 extern convar_t	*gl_test;		// cvar to testify new effects
 extern convar_t	*gl_msaa;
+extern convar_t *gl_overbright;
+extern convar_t *gl_overbright_studio;
+
 
 extern convar_t	*r_ypos;
 extern convar_t	*r_xpos;
@@ -697,5 +699,6 @@ extern convar_t	*vid_fullscreen;
 extern convar_t	*vid_gamma;
 extern convar_t	*vid_texgamma;
 extern convar_t	*vid_mode;
+extern convar_t *vid_highdpi;
 
 #endif//GL_LOCAL_H

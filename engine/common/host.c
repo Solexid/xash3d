@@ -13,8 +13,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
-#include "port.h"
-
+#include "common.h"
 #if defined(XASH_SDL)
 #include <SDL.h>
 #endif
@@ -22,7 +21,7 @@ GNU General Public License for more details.
 #include <stdarg.h>  // va_args
 #include <errno.h> // errno
 
-#include "common.h"
+
 #include "netchan.h"
 #include "server.h"
 #include "protocol.h"
@@ -32,8 +31,11 @@ GNU General Public License for more details.
 #include "touch.h"
 #include "engine_features.h"
 #include "render_api.h"	// decallist_t
-#include "sdl/events.h"
 #include "library.h"
+#include "base_cmd.h"
+#ifdef XASH_SDL
+#include "platform/sdl/events.h"
+#endif
 
 typedef void (*pfnChangeGame)( const char *progname );
 
@@ -59,6 +61,41 @@ convar_t 	*cmd_scripting = NULL;
 
 static int num_decals;
 
+static const char *usage_str = "Usage:\n"
+"\t    "
+#ifndef __ANDROID__
+"<xash_binary>"
+#ifdef _WIN32
+".exe"
+#endif
+#endif
+" [options] [+command1] [+command2 arg]\n"
+"Availiable options:\n"
+#define O(x,y) "    "x"    "y"\n"
+O("-dev <level>  ","set developer level")
+O("-log          ","write log to \"engine.log")
+O("-toconsole    ","start witn console open")
+#ifdef __ANDROID__
+O("-nonativeegl  ","use java egl implementation. Use if screen does not update")
+#endif
+O("-nojoy        ","disable joystick support")
+O("-nosound      ","disable sound")
+O("-nowriteconfig","disable config save")
+O("-casesensitive","disable case-insensitivity hacks")
+#ifndef __ANDROID__
+O("-dedicated    ","run in deficated server mode")
+#endif
+#ifdef _WIN32
+O("-noavi        ","disable AVI support")
+O("-nointro      ","disable intro video")
+O("-nowcon       ","disable win32 console")
+O("-noipx        ","disable IPX")
+#endif
+O("-noip         ","disable TCP/IP")
+O("-noch         ","disable crashhandler")
+O("-disablehelp  ","disable this message")
+#undef O
+;
 // these cvars will be duplicated on each client across network
 int Host_ServerState( void )
 {
@@ -174,13 +211,64 @@ Host_AbortCurrentFrame
 aborts the current host frame and goes on with the next one
 ================
 */
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
+void Host_Frame( float time );
+void Host_RunFrame()
+{
+	static double	oldtime, newtime;
+#ifdef XASH_SDL
+	SDL_Event event;
+#endif
+	if( !oldtime )
+		oldtime = Sys_DoubleTime();
+
+
+#if XASH_INPUT == INPUT_SDL
+		while( !host.crashed && !host.shutdown_issued && SDL_PollEvent( &event ) )
+			SDLash_EventFilter( &event );
+#elif XASH_INPUT == INPUT_ANDROID
+		Android_RunEvents();
+#endif
+		newtime = Sys_DoubleTime ();
+		Host_Frame( newtime - oldtime );
+
+		oldtime = newtime;
+#ifdef __EMSCRIPTEN__
+#ifdef EMSCRIPTEN_ASYNC
+	emscripten_sleep(1);
+#else
+	if( host.crashed || host.shutdown_issued )
+		emscritpen_cancel_main_loop();
+#endif
+#endif
+}
+
+void Host_FrameLoop()
+{
+#if defined __EMSCRIPTEN__ && !defined EMSCRIPTEN_ASYNC
+	emscripten_cancel_main_loop();
+	emscripten_set_main_loop( Host_RunFrame, 0, 1 );
+#else
+	// main window message loop
+	while( !host.crashed && !host.shutdown_issued )
+	{
+		Host_RunFrame();
+	}
+#endif
+}
 
 void EXPORT Host_AbortCurrentFrame( void )
 {
+#ifndef NO_SJLJ
 	if( host.framecount == 0 ) // abort frame was not set up
 		Sys_Break("Could not abort current frame");
 	else
 		longjmp( host.abortframe, 1 );
+#else // sj/lj not supported, so re-run main loop with shifted stack
+	Host_FrameLoop();
+#endif
 	exit(127);
 }
 
@@ -297,6 +385,23 @@ void Host_Exec_f( void )
 	Cbuf_InsertText( "\n" );
 	Cbuf_InsertText( f );
 	Mem_Free( f );
+}
+
+/*
+===============
+Host_Clear_f
+
+Clear all consoles
+===============
+*/
+void Host_Clear_f( void )
+{
+#ifndef XASH_DEDICATED
+	Con_Clear();
+#endif
+#ifdef XASH_W32CON
+	Wcon_Clear();
+#endif
 }
 
 /*
@@ -516,7 +621,7 @@ void Host_GetConsoleCommands( void )
 {
 	char	*cmd;
 
-	while( ( cmd = Con_Input() ) )
+	while( ( cmd = Sys_Input() ) )
 	{
 		Cbuf_AddText( cmd );
 		Cbuf_Execute();
@@ -582,7 +687,7 @@ Host_Autosleep
 */
 void Host_Autosleep( void )
 {
-	int sleeptime = host_sleeptime->value;
+	int sleeptime = host_sleeptime->integer;
 
 	if( Host_IsDedicated() )
 	{
@@ -617,8 +722,10 @@ Host_Frame
 */
 void Host_Frame( float time )
 {
+#ifndef NO_SJLJ
 	if( setjmp( host.abortframe ))
 		return;
+#endif
 
 	Host_Autosleep();
 
@@ -654,19 +761,7 @@ If no console is visible, the text will appear at the top of the game window
 */
 void Host_Print( const char *txt )
 {
-	if( host.rd.target )
-	{
-		if(( Q_strlen( txt ) + Q_strlen( host.rd.buffer )) > ( host.rd.buffersize - 1 ))
-		{
-			if( host.rd.flush )
-			{
-				host.rd.flush( host.rd.address, host.rd.target, host.rd.buffer );
-				*host.rd.buffer = 0;
-			}
-		}
-		Q_strcat( host.rd.buffer, txt );
-		return;
-	}
+	Rcon_Print( txt );
 	Con_Print( txt ); // echo to client console
 }
 
@@ -852,16 +947,27 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 	}
 	else
 	{
-		#if defined(XASH_SDL)
+		#if TARGET_OS_IPHONE
+		const char *IOS_GetDocsDir();
+		Q_strncpy( host.rootdir, IOS_GetDocsDir(), sizeof(host.rootdir) );
+		#elif defined(XASH_SDL)
 		if( !( baseDir = SDL_GetBasePath() ) )
 			Sys_Error( "couldn't determine current directory: %s", SDL_GetError() );
 		Q_strncpy( host.rootdir, baseDir, sizeof( host.rootdir ) );
+		SDL_free( baseDir );
 		#else
 		if( !getcwd( host.rootdir, sizeof(host.rootdir) ) )
 			host.rootdir[0] = 0;
 		#endif
 	}
 
+	if( !Sys_CheckParm( "-disablehelp" ) )
+	{
+	    if( Sys_CheckParm( "-help" ) || Sys_CheckParm( "-h" ) || Sys_CheckParm( "--help" ) )
+	    {
+		Sys_Error( "%s", usage_str );
+	    }
+	}
 	if( host.rootdir[Q_strlen( host.rootdir ) - 1] == '/' )
 		host.rootdir[Q_strlen( host.rootdir ) - 1] = 0;
 
@@ -872,7 +978,7 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 
 	host.change_game = bChangeGame;
 	host.state = HOST_INIT; // initialization started
-	host.developer = host.old_developer = 0;
+	host.developer = host.old_developer = DEFAULT_DEV;
 	host.textmode = false;
 
 	host.mempool = Mem_AllocPool( "Zone Engine" );
@@ -900,18 +1006,23 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 	host.mouse_visible = false;
 
 #ifdef XASH_SDL
-	if( SDL_Init( SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_EVENTS ) )
+	// should work even if it failed
+	SDL_Init( SDL_INIT_TIMER );
+
+	if( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_EVENTS ) )
 	{
-		SDL_Init( SDL_INIT_TIMER );
 		Sys_Warn( "SDL_Init failed: %s", SDL_GetError() );
 		host.type = HOST_DEDICATED;
 	}
+	SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 #endif
 
-	if ( SetCurrentDirectory( host.rootdir ) != 0)
+	if ( !host.rootdir[0] || SetCurrentDirectory( host.rootdir ) != 0)
 		MsgDev( D_INFO, "%s is working directory now\n", host.rootdir );
 	else
 		Sys_Error( "Changing working directory to %s failed.\n", host.rootdir );
+
+	Sys_InitLog();
 
 	// set default gamedir
 	if( progname[0] == '#' ) progname++;
@@ -930,16 +1041,23 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 	}
 
 	host.old_developer = host.developer;
-	if( !Sys_CheckParm( "-nowcon" ) )
-		Con_CreateConsole();
+
+#ifdef XASH_W32CON
+	Wcon_Init();
+	Wcon_CreateConsole();
+#endif
 
 	// first text message into console or log 
-	MsgDev( D_NOTE, "Sys_LoadLibrary: Loading Engine Library - ok\n" );
+	MsgDev( D_NOTE, "Console initialized\n" );
 
+#if 1
+	BaseCmd_Init();
+#endif
 	// startup cmds and cvars subsystem
 	Cmd_Init();
 	Cvar_Init();
 
+	Cmd_AddCommand( "clear", Host_Clear_f, "clear console history" );
 
 	// share developer level across all dlls
 	Q_snprintf( dev_level, sizeof( dev_level ), "%i", host.developer );
@@ -987,10 +1105,6 @@ Host_Main
 */
 int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bChangeGame, pfnChangeGame func )
 {
-	static double	oldtime, newtime;
-#ifdef XASH_SDL
-	SDL_Event event;
-#endif
 	pChangeGame = func;	// may be NULL
 
 	Host_InitCommon( argc, argv, progname, bChangeGame );
@@ -1053,22 +1167,25 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 
 	HTTP_Init();
 
+	ID_Init();
+
 	// post initializations
 	switch( host.type )
 	{
 	case HOST_NORMAL:
-		Con_ShowConsole( false ); // hide console
+#ifdef XASH_W32CON
+		Wcon_ShowConsole( false ); // hide console
+#endif
 		// execute startup config and cmdline
 		Cbuf_AddText( va( "exec %s.rc\n", SI.ModuleName ) );
 		CSCR_LoadDefaultCVars( "settings.scr" );
 		CSCR_LoadDefaultCVars( "user.scr" );
 		// intentional fallthrough
 	case HOST_DEDICATED:
-		Cbuf_Execute(); // force stuffcmds run if it is in cbuf
+		//Cbuf_Execute(); // force stuffcmds run if it is in cbuf
 		// if stuffcmds wasn't run, then init.rc is probably missing, use default
-		if( !host.stuffcmdsrun ) Cbuf_AddText( "stuffcmds\n" );
+		if( !FS_FileExists( va( "%s.rc\n", SI.ModuleName ), false ) ) Cbuf_AddText( "stuffcmds\n" );
 
-		Cbuf_Execute();
 		break;
 	case HOST_UNKNOWN:
 		break;
@@ -1076,9 +1193,6 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 
 	if( Host_IsDedicated() )
 	{
-		char *defaultmap;
-		Con_InitConsoleCommands ();
-
 		Cmd_AddCommand( "quit", Sys_Quit, "quit the game" );
 		Cmd_AddCommand( "exit", Sys_Quit, "quit the game" );
 
@@ -1086,17 +1200,12 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 
 		Cbuf_AddText( "exec config.cfg\n" );
 
-		// dedicated servers are using settings from server.cfg file
-		Cbuf_AddText( va( "exec %s\n", Cvar_VariableString( "servercfgfile" )));
-		Cbuf_Execute();
-
-		defaultmap = Cvar_VariableString( "defaultmap" );
-		if( !defaultmap[0] )
-			Msg( "Please add \"defaultmap\" cvar with default map name to your server.cfg!\n" );
-		else
-			Cbuf_AddText( va( "map %s\n", defaultmap ));
+		if( !Sys_CheckParm("+map") )
+				Cbuf_AddText( "startdefaultmap" );
 
 		Cvar_FullSet( "xashds_hacks", "0", CVAR_READ_ONLY );
+
+		Cbuf_Execute(); // apply port cvar
 
 		NET_Config( true );
 	}
@@ -1107,10 +1216,11 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 		// listenserver/multiplayer config.
 		// need load it to update menu options.
 		Cbuf_AddText( "exec game.cfg\n" );
+		Cmd_AddCommand( "host_writeconfig", Host_WriteConfig, "force save configs. use with care" );
 	}
 
 	host.errorframe = 0;
-	Cbuf_Execute();
+
 
 	host.change_game = false;	// done
 	Cmd_RemoveCommand( "setr" );	// remove potential backdoor for changing renderer settings
@@ -1120,10 +1230,14 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 	if( !Host_IsDedicated() )
 		Cmd_ExecuteString( "exec config.cfg\n", src_command );
 
+	Cbuf_Execute();
+
 	// exec all files from userconfig.d 
 	Host_Userconfigd_f();
 
-	oldtime = Sys_DoubleTime();
+	// in case of empty init.rc
+	if( !host.stuffcmdsrun ) Cbuf_AddText( "stuffcmds\n" );
+
 	IN_TouchInitConfig();
 	SCR_CheckStartupVids();	// must be last
 #ifdef XASH_SDL
@@ -1136,20 +1250,7 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 	if( host.state == HOST_INIT )
 		host.state = HOST_FRAME; // initialization is finished
 
-	// main window message loop
-	while( !host.crashed && !host.shutdown_issued )
-	{
-#ifdef XASH_SDL
-		while( !host.crashed && !host.shutdown_issued && SDL_PollEvent( &event ) )
-			SDLash_EventFilter( &event );
-#elif defined(__ANDROID__)
-		Android_RunEvents();
-#endif
-		newtime = Sys_DoubleTime ();
-		Host_Frame( newtime - oldtime );
-
-		oldtime = newtime;
-	}
+	Host_FrameLoop();
 
 	// never reached
 	return 0;
@@ -1177,12 +1278,16 @@ void EXPORT Host_Shutdown( void )
 			host.state = HOST_SHUTDOWN;
 		break;
 	default:
-		if( !Host_IsDedicated() )
+#ifndef XASH_DEDICATED
+		if( !Host_IsDedicated() && !host.skip_configs )
 		{
 			// restore all latched cheat cvars
 			Cvar_SetCheatState( true );
 			Host_WriteConfig();
+			IN_TouchWriteConfig();
+			host.skip_configs = false;
 		}
+#endif
 		host.state = HOST_SHUTDOWN; // prepare host to normal shutdown
 	}
 
@@ -1193,13 +1298,17 @@ void EXPORT Host_Shutdown( void )
 	Log_Close();
 
 	SV_Shutdown( false );
+	SV_UnloadProgs();
 	CL_Shutdown();
 
 	Mod_Shutdown();
 	NET_Shutdown();
 	HTTP_Shutdown();
+	Con_ClearAutoComplete();
 	Cmd_Shutdown();
 	Host_FreeCommon();
-	Con_DestroyConsole();
+	Sys_DestroyConsole();
+	Sys_CloseLog();
 	Sys_RestoreCrashHandler();
+
 }

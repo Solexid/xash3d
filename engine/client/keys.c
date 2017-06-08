@@ -21,7 +21,7 @@ GNU General Public License for more details.
 
 #ifdef XASH_SDL
 #include <SDL_keyboard.h>
-#include <events.h>
+#include <platform/sdl/events.h>
 #endif
 
 typedef struct key_s
@@ -559,7 +559,7 @@ Key_Event
 Called by the system for both key up and key down events
 ===================
 */
-void Key_Event( int key, qboolean down )
+void GAME_EXPORT Key_Event( int key, qboolean down )
 {
 	const char	*kb;
 	char		cmd[1024];
@@ -574,7 +574,7 @@ void Key_Event( int key, qboolean down )
 
 	if( down )
 	{
-		//keys[key].repeats++;
+		keys[key].repeats++;
 
 		if( key != K_BACKSPACE && key != K_PAUSE && keys[key].repeats > 1 )
 		{
@@ -610,6 +610,11 @@ void Key_Event( int key, qboolean down )
 			if( host.mouse_visible && cls.state != ca_cinematic )
 			{
 				clgame.dllFuncs.pfnKey_Event( down, key, keys[key].binding );
+
+				// enable anti-The_Swank system
+				if( cls.state == ca_connected && Con_Visible() )
+					Key_SetKeyDest( key_console );
+
 				return; // handled in client.dll
 			}
 			break;
@@ -746,9 +751,9 @@ void Key_Event( int key, qboolean down )
 
 void Key_EnableTextInput( qboolean enable, qboolean force )
 {
-#ifdef XASH_SDL
+#if XASH_INPUT == INPUT_SDL
 	SDLash_EnableTextInput( enable, force );
-#elif defined(__ANDROID__)
+#elif XASH_INPUT == INPUT_ANDROID
 	Android_EnableTextInput( enable, force );
 #endif
 #if 0
@@ -773,8 +778,10 @@ void Key_SetKeyDest( int key_dest )
 		{
 			Cbuf_Execute();
 			if( cl.refdef.paused )
+			{
 				Cbuf_InsertText("pause\n");
-			Cbuf_Execute();
+				Cbuf_Execute();
+			}
 			cl.refdef.paused = 0;
 		}
 		cls.key_dest = key_game;
@@ -834,11 +841,13 @@ void CL_CharEvent( int key )
 #ifdef _WIN32
 	if( key == '`' || key == '~' ) return;
 
+#if 0
 	if( cls.key_dest == key_console && !Con_Visible( ))
 	{
 		if((char)key == '�' || (char)key == '�' )
 			return; // don't pass '�' when we open the console 
 	}
+#endif
 #endif
 	// distribute the key down event to the apropriate handler
 	if( cls.key_dest == key_console || cls.key_dest == key_message )

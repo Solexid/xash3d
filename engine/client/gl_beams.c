@@ -84,8 +84,13 @@ static cl_entity_t *CL_GetBeamEntityByIndex( int index )
 {
 	cl_entity_t	*ent;
 
-	if( index > 0 ) index = BEAMENT_ENTITY( index );
-	ent = CL_GetEntityByIndex( index );
+	if( index < 0 )
+	{
+		index = BEAMENT_ENTITY( -index );
+		return clgame.dllFuncs.pfnGetUserEntity( index );
+	}
+	ent = CL_GetEntityByIndex( BEAMENT_ENTITY( index ) );
+
 
 	return ent;
 }
@@ -116,7 +121,6 @@ static qboolean ComputeBeamEntPosition( int beamEnt, vec3_t pt )
 	int		nAttachment;
 
 	pEnt = CL_GetBeamEntityByIndex( beamEnt );
-	nAttachment = ( beamEnt > 0 ) ? BEAMENT_ATTACHMENT( beamEnt ) : 0;
 
 	if( !pEnt )
 	{
@@ -124,16 +128,24 @@ static qboolean ComputeBeamEntPosition( int beamEnt, vec3_t pt )
 		return false;
 	}
 
-	if(( pEnt->index - 1 ) == cl.playernum && !cl.thirdperson )
-	{
-		// if we view beam at firstperson use viewmodel instead
-		pEnt = &clgame.viewent;
-	}
+	if( beamEnt < 0 )
+		nAttachment = BEAMENT_ATTACHMENT( -beamEnt );
+	else
+		nAttachment = BEAMENT_ATTACHMENT( beamEnt );
+
 
 	// get attachment
 	if( nAttachment > 0 )
 		VectorCopy( pEnt->attachment[nAttachment - 1], pt );
-	else VectorCopy( pEnt->origin, pt );
+	else
+	{
+		if(( pEnt->index - 1 ) == cl.playernum && !cl.thirdperson )
+		{
+			// if we view beam at firstperson use viewmodel instead
+			pEnt = &clgame.viewent;
+		}
+		VectorCopy( pEnt->origin, pt );
+	}
 
 	return true;
 }
@@ -1640,7 +1652,7 @@ Remove beam attached to specified entity
 and all particle trails (if this is a beamfollow)
 ==============
 */
-void CL_BeamKill( int deadEntity )
+void GAME_EXPORT CL_BeamKill( int deadEntity )
 {
 	cl_entity_t	*pDeadEntity;
 
@@ -1657,7 +1669,7 @@ CL_BeamEnts
 Create beam between two ents
 ==============
 */
-BEAM *CL_BeamEnts( int startEnt, int endEnt, int modelIndex, float life, float width, float amplitude, float brightness,
+BEAM *GAME_EXPORT CL_BeamEnts( int startEnt, int endEnt, int modelIndex, float life, float width, float amplitude, float brightness,
 	float speed, int startFrame, float framerate, float r, float g, float b )
 {
 	cl_entity_t	*pStart, *pEnd;
@@ -1705,7 +1717,7 @@ CL_BeamPoints
 Create beam between two points
 ==============
 */
-BEAM *CL_BeamPoints( const vec3_t start, const vec3_t end, int modelIndex, float life, float width, float amplitude,
+BEAM *GAME_EXPORT CL_BeamPoints( const vec3_t start, const vec3_t end, int modelIndex, float life, float width, float amplitude,
 	float brightness, float speed, int startFrame, float framerate, float r, float g, float b )
 {
 	BEAM	*pBeam;
@@ -1754,7 +1766,7 @@ CL_BeamLighting
 Create beam between two points (simple version)
 ==============
 */
-BEAM *CL_BeamLightning( const vec3_t start, const vec3_t end, int modelIndex, float life, float width, float amplitude,
+BEAM *GAME_EXPORT CL_BeamLightning( const vec3_t start, const vec3_t end, int modelIndex, float life, float width, float amplitude,
 	float brightness, float speed )
 {
 	return CL_BeamPoints( start, end, modelIndex, life, width, amplitude, brightness, speed,
@@ -1768,7 +1780,7 @@ CL_BeamCirclePoints
 Create beam cicrle
 ==============
 */
-BEAM *CL_BeamCirclePoints( int type, const vec3_t start, const vec3_t end, int modelIndex, float life, float width,
+BEAM *GAME_EXPORT CL_BeamCirclePoints( int type, const vec3_t start, const vec3_t end, int modelIndex, float life, float width,
 	float amplitude, float brightness, float speed, int startFrame, float framerate, float r, float g, float b )
 {
 	BEAM	*pBeam;
@@ -1814,7 +1826,7 @@ CL_BeamEntPoint
 Create beam between entity and point
 ==============
 */
-BEAM *CL_BeamEntPoint( int startEnt, const vec3_t end, int modelIndex, float life, float width, float amplitude,
+BEAM *GAME_EXPORT CL_BeamEntPoint( int startEnt, const vec3_t end, int modelIndex, float life, float width, float amplitude,
 	float brightness, float speed, int startFrame, float framerate, float r, float g, float b )
 {
 	cl_entity_t	*pStart;
@@ -1868,7 +1880,7 @@ CL_BeamRing
 Create beam between two ents
 ==============
 */
-BEAM *CL_BeamRing( int startEnt, int endEnt, int modelIndex, float life, float width, float amplitude, float brightness,
+BEAM *GAME_EXPORT CL_BeamRing( int startEnt, int endEnt, int modelIndex, float life, float width, float amplitude, float brightness,
 	float speed, int startFrame, float framerate, float r, float g, float b )
 {
 	cl_entity_t	*pStart, *pEnd;
@@ -1916,7 +1928,7 @@ CL_BeamFollow
 Create beam following with entity
 ==============
 */
-BEAM *CL_BeamFollow( int startEnt, int modelIndex, float life, float width, float r, float g, float b, float bright )
+BEAM *GAME_EXPORT CL_BeamFollow( int startEnt, int modelIndex, float life, float width, float r, float g, float b, float bright )
 {
 	cl_entity_t	*pStart;
 	BEAM		*pBeam;

@@ -383,7 +383,7 @@ void GL_FrontFace( GLenum front )
 	glState.frontFace = front;
 }
 
-void GL_SetRenderMode( int mode )
+void GAME_EXPORT GL_SetRenderMode( int mode )
 {
 	pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
 
@@ -408,7 +408,7 @@ void GL_SetRenderMode( int mode )
 	case kRenderTransAdd:
 		pglEnable( GL_BLEND );
 		pglDisable( GL_ALPHA_TEST );
-#if defined(XASH_GLES) // Problem with blending exists on every GLES configuration, not only on Android
+#if defined(XASH_BLEND_ES_WORKAROUND) // Problem with blending exists on every GLES configuration, not only on Android
 		pglBlendFunc( GL_ONE, GL_ONE );
 #else
 		pglBlendFunc( GL_SRC_ALPHA, GL_ONE );
@@ -677,8 +677,8 @@ rebuild_page:
 	end = total * gl_showtextures->integer;
 	if( end > MAX_TEXTURES ) end = MAX_TEXTURES;
 
-	w = glState.width / base_w;
-	h = glState.height / base_h;
+	w = glState.width / (float)base_w;
+	h = glState.height / (float)base_h;
 
 	Con_DrawStringLen( NULL, NULL, &charHeight );
 
@@ -705,7 +705,7 @@ rebuild_page:
 			continue;
 
 		x = k % base_w * w;
-		y = k / base_w * h;
+		y = k / (float)base_w * h;
 
 		pglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
 		GL_Bind( XASH_TEXTURE0, i ); // NOTE: don't use image->texnum here, because skybox has a 'wrong' indexes

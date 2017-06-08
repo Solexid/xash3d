@@ -42,11 +42,11 @@ GNU General Public License for more details.
 	#if defined(__APPLE__)
 		#include <sys/syslimits.h>
 		#define OS_LIB_EXT "dylib"
+        #define OPEN_COMMAND "open"
+		#include "TargetConditionals.h"
 	#else
-		#if defined(__linux__)
-			#include <linux/limits.h>
-		#endif
 		#define OS_LIB_EXT "so"
+        #define OPEN_COMMAND "xdg-open"
 	#endif
 
 	#if defined(__ANDROID__)
@@ -62,18 +62,13 @@ GNU General Public License for more details.
 		#define SERVERDLL "libserver" POSTFIX "." OS_LIB_EXT
 		#define GAMEPATH "/sdcard/xash"
 	#else
-		#define MENUDLL "libxashmenu"ARCH_SUFFIX"." OS_LIB_EXT
-		#define CLIENTDLL "client"ARCH_SUFFIX"." OS_LIB_EXT
+        #define MENUDLL "libxashmenu" ARCH_SUFFIX "." OS_LIB_EXT
+        #define CLIENTDLL "client" ARCH_SUFFIX "." OS_LIB_EXT
 	#endif
 
 	#define VGUI_SUPPORT_DLL "libvgui_support." OS_LIB_EXT
 
-	#define TRUE	    1
-	#define FALSE	    0
-
 	// Windows-specific
-	#define _stdcall
-	#define __stdcall
 	#define __cdecl
 	#define _inline	static inline
 	#define O_BINARY 0 // O_BINARY is Windows extension
@@ -85,7 +80,7 @@ GNU General Public License for more details.
 	#define GetProcAddress( x, y )		dlsym( x, y )
 	#define SetCurrentDirectory( x )	(!chdir( x ))
 	#define FreeLibrary( x )			dlclose( x )
-	#define MAKEWORD( a, b )			((short int)(((unsigned char)(a))|(((short int)((unsigned char)(b)))<<8)))
+	//#define MAKEWORD( a, b )			((short int)(((unsigned char)(a))|(((short int)((unsigned char)(b)))<<8)))
 	#define max( a, b )                 (((a) > (b)) ? (a) : (b))
 	#define min( a, b )                 (((a) < (b)) ? (a) : (b))
 	#define tell( a )					lseek(a, 0, SEEK_CUR)
@@ -141,9 +136,4 @@ GNU General Public License for more details.
 	#define VGUI_SUPPORT_DLL "../vgui_support." OS_LIB_EXT
 #endif
 
-#ifdef __GNUC__
-#define _format(x) __attribute__((format(printf, x, x+1)))
-#else
-#define _format(x)
-#endif
-#endif
+#endif // PORT_H

@@ -13,7 +13,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 #ifndef XASH_DEDICATED
-#include "port.h"
 
 #include "common.h"
 #include "input.h"
@@ -131,7 +130,7 @@ convar_t	*evdev_mousepath;
 convar_t	*evdev_grab;
 
 
-int KeycodeFromEvdev(int keycode);
+int KeycodeFromEvdev(int keycode, int value);
 
 /*
 ===========
@@ -188,7 +187,7 @@ void Evdev_CloseMouse_f ( void )
 
 void IN_EvdevFrame ()
 {
-	if ( evdev_open )
+	if( evdev_open && !m_ignore->integer )
 	{
 		struct input_event ev;
 		evdev_dx = evdev_dy = 0;
@@ -202,17 +201,36 @@ void IN_EvdevFrame ()
 					break;
 					case REL_Y: evdev_dy += ev.value;
 					break;
+					case REL_WHEEL:
+					if( ev.value > 0)
+					{
+						Key_Event( K_MWHEELDOWN, 1 );
+						Key_Event( K_MWHEELDOWN, 0 );
+					}
+					else
+					{
+						Key_Event( K_MWHEELUP, 1 );
+						Key_Event( K_MWHEELUP, 0 );
+					}
+					break;
 				}
 			}
 			else if ( ( ev.type == EV_KEY ) && (evdev_grab->value == 1.0 ) )
 			{
-				Key_Event ( KeycodeFromEvdev( ev.code ) , ev.value);
+				switch (ev.code) {
+				case BTN_LEFT:
+					Key_Event( K_MOUSE1, ev.value );
+					break;
+				case BTN_MIDDLE:
+					Key_Event( K_MOUSE3, ev.value );
+					break;
+				case BTN_RIGHT:
+					Key_Event( K_MOUSE2, ev.value );
+					break;
+				default:
+					Key_Event ( KeycodeFromEvdev( ev.code, ev.value ) , ev.value);
+				}
 			}
-		}
-		if( ( evdev_grab->value == 1 ) && ( cls.key_dest != key_game ) )
-		{
-			ioctl( mouse_fd, EVIOCGRAB, (void*) 0);
-			Key_Event( K_ESCAPE, 0 ); //Do not leave ESC down
 		}
 		if(clgame.dllFuncs.pfnLookEvent)
 			clgame.dllFuncs.pfnLookEvent( -evdev_dx * m_yaw->value, evdev_dy * m_pitch->value );
@@ -225,17 +243,23 @@ void IN_EvdevFrame ()
 	}
 	
 }
+
+void Evdev_SetGrab( qboolean grab )
+{
+	if( !evdev_open || !evdev_grab->integer )
+		return;
+	ioctl( mouse_fd, EVIOCGRAB, (void*) grab );
+	if( grab )
+		Key_Event( K_ESCAPE, 0 ); //Do not leave ESC down
+}
+
 #endif
 
 void IN_StartupMouse( void )
 {
 	if( Host_IsDedicated() ) return;
-#ifdef __ANDROID__
-#define M_IGNORE "1"
-#else
-#define M_IGNORE "0"
-#endif
-	m_ignore = Cvar_Get( "m_ignore", M_IGNORE, CVAR_ARCHIVE , "ignore mouse events" );
+
+	m_ignore = Cvar_Get( "m_ignore", DEFAULT_M_IGNORE, CVAR_ARCHIVE , "ignore mouse events" );
 
 	m_enginemouse = Cvar_Get("m_enginemouse", "0", CVAR_ARCHIVE, "Read mouse events in engine instead of client");
 	m_enginesens = Cvar_Get("m_enginesens", "0.3", CVAR_ARCHIVE, "Mouse sensitivity, when m_enginemouse enabled");
@@ -298,6 +322,21 @@ void IN_ToggleClientMouse( int newstate, int oldstate )
 #ifdef XASH_SDL
 		SDL_SetWindowGrab(host.hWnd, SDL_FALSE);
 #endif
+#ifdef __ANDROID__
+		Android_ShowMouse( true );
+#endif
+#ifdef USE_EVDEV
+		Evdev_SetGrab( false );
+#endif
+	}
+	else
+	{
+#ifdef __ANDROID__
+		Android_ShowMouse( false );
+#endif
+#ifdef USE_EVDEV
+		Evdev_SetGrab( true );
+#endif
 	}
 }
 
@@ -317,14 +356,6 @@ void IN_ActivateMouse( qboolean force )
 
 	if( CL_Active() && host.mouse_visible && !force )
 		return;	// VGUI controls
-#ifdef USE_EVDEV
-		if( evdev_open && ( evdev_grab->value == 1 ) && cls.key_dest == key_game )
-		{
-			ioctl( mouse_fd, EVIOCGRAB, (void*) 1);
-			Key_Event( K_ESCAPE, 0 ); //Do not leave ESC down
-		}
-		else
-#endif
 
 	if( cls.key_dest == key_menu && vid_fullscreen && !vid_fullscreen->integer)
 	{
@@ -415,7 +446,7 @@ void IN_MouseMove( void )
 
 	// Show cursor in UI
 #ifdef XASH_SDL
-	if( UI_IsVisible() ) SDL_ShowCursor( true );
+	if( UI_IsVisible() ) SDL_ShowCursor( SDL_TRUE );
 #endif
 	// find mouse movement
 #ifdef XASH_SDL
@@ -502,6 +533,11 @@ IN_Shutdown
 void IN_Shutdown( void )
 {
 	IN_DeactivateMouse( );
+
+#ifdef USE_EVDEV
+	Cmd_RemoveCommand( "evdev_mouseopen" );
+	Cmd_RemoveCommand( "evdev_mouseclose" );
+#endif
 }
 
 
@@ -541,12 +577,12 @@ Common function for engine joystick movement
 ================
 */
 
-#define F 1U << 0	// Forward
-#define B 1U << 1	// Back
-#define L 1U << 2	// Left
-#define R 1U << 3	// Right
-#define T 1U << 4	// Forward stop
-#define S 1U << 5	// Side stop
+#define F (1U << 0)	// Forward
+#define B (1U << 1)	// Back
+#define L (1U << 2)	// Left
+#define R (1U << 3)	// Right
+#define T (1U << 4)	// Forward stop
+#define S (1U << 5)	// Side stop
 void IN_JoyAppendMove( usercmd_t *cmd, float forwardmove, float sidemove )
 {
 	static uint moveflags = T | S;
@@ -628,13 +664,22 @@ void IN_EngineAppendMove( float frametime, usercmd_t *cmd, qboolean active )
 	if(active)
 	{
 		float sensitivity = ((float)cl.refdef.fov_x / (float)90.0f);
-#ifdef XASH_SDL
-		if( m_enginemouse->integer )
+#if XASH_INPUT == INPUT_SDL
+		if( m_enginemouse->integer && !m_ignore->integer )
 		{
 			int mouse_x, mouse_y;
 			SDL_GetRelativeMouseState( &mouse_x, &mouse_y );
-			cl.refdef.cl_viewangles[PITCH] += mouse_y * sensitivity;
-			cl.refdef.cl_viewangles[YAW] -= mouse_x * sensitivity;
+			cl.refdef.cl_viewangles[PITCH] += mouse_y * m_pitch->value * sensitivity;
+			cl.refdef.cl_viewangles[YAW] -= mouse_x * m_yaw->value * sensitivity;
+		}
+#endif
+#ifdef __ANDROID__
+		if( !m_ignore->integer )
+		{
+			float  mouse_x, mouse_y;
+			Android_MouseMove( &mouse_x, &mouse_y );
+			cl.refdef.cl_viewangles[PITCH] += mouse_y * m_pitch->value * sensitivity;
+			cl.refdef.cl_viewangles[YAW] -= mouse_x * m_yaw->value * sensitivity;
 		}
 #endif
 		Joy_FinalizeMove( &forward, &side, &dyaw, &dpitch );
@@ -668,10 +713,19 @@ void Host_InputFrame( void )
 		int dx, dy;
 
 #ifndef __ANDROID__
-		if( in_mouseinitialized )
+		if( in_mouseinitialized && !m_ignore->integer )
 		{
 			SDL_GetRelativeMouseState( &dx, &dy );
 			pitch += dy * m_pitch->value, yaw -= dx * m_yaw->value; //mouse speed
+		}
+#endif
+
+#ifdef __ANDROID__
+		if( !m_ignore->integer )
+		{
+			float  mouse_x, mouse_y;
+			Android_MouseMove( &mouse_x, &mouse_y );
+			pitch += mouse_y * m_pitch->value, yaw -= mouse_x * m_yaw->value; //mouse speed
 		}
 #endif
 
@@ -704,6 +758,7 @@ void Host_InputFrame( void )
 	}
 
 	IN_ActivateMouse( false );
+
 	IN_MouseMove();
 }
 #endif

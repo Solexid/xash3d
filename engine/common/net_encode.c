@@ -861,7 +861,7 @@ void Delta_Shutdown( void )
 
 		if( dt_info[i].pFields )
 		{
-			Z_Free( dt_info[i].pFields );
+			Mem_Free( dt_info[i].pFields );
 			dt_info[i].pFields = NULL;
 		}
 
@@ -887,63 +887,63 @@ int Delta_ClampIntegerField( int iValue, qboolean bSigned, int bits )
 		break;
 	case 2:
 		if( bSigned ) iValue = bound( -2, (short)iValue, 1 );
-		else iValue = bound( 0, (word)iValue, 3 );
+		else iValue = boundmax( (word)iValue, 3 );
 		break;
 	case 3:
 		if( bSigned ) iValue = bound( -4, (short)iValue, 3 );
-		else iValue = bound( 0, (word)iValue, 7 );
+		else iValue = boundmax( (word)iValue, 7 );
 		break;
 	case 4:
 		if( bSigned ) iValue = bound( -8, (short)iValue, 7 );
-		else iValue = bound( 0, (word)iValue, 15 );
+		else iValue = boundmax( (word)iValue, 15 );
 		break;
 	case 5:
 		if( bSigned ) iValue = bound( -16, (short)iValue, 15 );
-		else iValue = bound( 0, (word)iValue, 31 );
+		else iValue = boundmax( (word)iValue, 31 );
 		break;
 	case 6:
 		if( bSigned ) iValue = bound( -32, (short)iValue, 31 );
-		else iValue = bound( 0, (word)iValue, 63 );
+		else iValue = boundmax( (word)iValue, 63 );
 		break;
 	case 7:
 		if( bSigned ) iValue = bound( -64, (short)iValue, 63 );
-		else iValue = bound( 0, (word)iValue, 127 );
+		else iValue = boundmax( (word)iValue, 127 );
 		break;
 	case 8:
 		if( bSigned ) iValue = bound( -128, (short)iValue, 127 );
-		else iValue = bound( 0, (word)iValue, 255 );
+		else iValue = boundmax( (word)iValue, 255 );
 		break;
 	case 9:
 		if( bSigned ) iValue = bound( -256, (short)iValue, 255 );
-		else iValue = bound( 0, (word)iValue, 511 );
+		else iValue = boundmax( (word)iValue, 511 );
 		break;
 	case 10:
 		if( bSigned ) iValue = bound( -512, (short)iValue, 511 );
-		else iValue = bound( 0, (word)iValue, 1023 );
+		else iValue = boundmax( (word)iValue, 1023 );
 		break;
 	case 11:
 		if( bSigned ) iValue = bound( -1024, (short)iValue, 1023 );
-		else iValue = bound( 0, (word)iValue, 2047 );
+		else iValue = boundmax( (word)iValue, 2047 );
 		break;
 	case 12:
 		if( bSigned ) iValue = bound( -2048, (short)iValue, 2047 );
-		else iValue = bound( 0, (word)iValue, 4095 );
+		else iValue = boundmax( (word)iValue, 4095 );
 		break;
 	case 13:
 		if( bSigned ) iValue = bound( -4096, (short)iValue, 4095 );
-		else iValue = bound( 0, (word)iValue, 8191 );
+		else iValue = boundmax( (word)iValue, 8191 );
 		break;
 	case 14:
 		if( bSigned ) iValue = bound( -8192, (short)iValue, 8191 );
-		else iValue = bound( 0, (word)iValue, 16383 );
+		else iValue = boundmax( (word)iValue, 16383 );
 		break;
 	case 15:
 		if( bSigned ) iValue = bound( -16384, (short)iValue, 16383 );
-		else iValue = bound( 0, (word)iValue, 32767 );
+		else iValue = boundmax( (word)iValue, 32767 );
 		break;
 	case 16:
 		if( bSigned ) iValue = bound( -32768, (short)iValue, 32767 );
-		else iValue = bound( 0, (word)iValue, 65535 );
+		else iValue = boundmax( (word)iValue, 65535 );
 		break;
 	}
 
@@ -989,8 +989,11 @@ qboolean Delta_CompareField( delta_t *pField, void *from, void *to, float timeba
 
 		fromF = Delta_ClampIntegerField( fromF, bSigned, pField->bits );
 		toF = Delta_ClampIntegerField( toF, bSigned, pField->bits );
-		if ( pField->multiplier != 1.0f ) fromF *= pField->multiplier;
-		if ( pField->multiplier != 1.0f ) toF *= pField->multiplier;
+		if( pField->multiplier != 1.0f )
+		{
+			fromF *= pField->multiplier;
+			toF *= pField->multiplier;
+		}
 	}
 	else if( pField->flags & DT_SHORT )
 	{
@@ -1007,8 +1010,11 @@ qboolean Delta_CompareField( delta_t *pField, void *from, void *to, float timeba
 
 		fromF = Delta_ClampIntegerField( fromF, bSigned, pField->bits );
 		toF = Delta_ClampIntegerField( toF, bSigned, pField->bits );
-		if ( pField->multiplier != 1.0f ) fromF *= pField->multiplier;
-		if ( pField->multiplier != 1.0f ) toF *= pField->multiplier;
+		if( pField->multiplier != 1.0f )
+		{
+			fromF *= pField->multiplier;
+			toF *= pField->multiplier;
+		}
 	}
 	else if( pField->flags & DT_INTEGER )
 	{
@@ -1025,8 +1031,11 @@ qboolean Delta_CompareField( delta_t *pField, void *from, void *to, float timeba
 
 		fromF = Delta_ClampIntegerField( fromF, bSigned, pField->bits );
 		toF = Delta_ClampIntegerField( toF, bSigned, pField->bits );
-		if ( pField->multiplier != 1.0f ) fromF *= pField->multiplier;
-		if ( pField->multiplier != 1.0f ) toF *= pField->multiplier;
+		if( pField->multiplier != 1.0f )
+		{
+			fromF *= pField->multiplier;
+			toF *= pField->multiplier;
+		}
 	}
 	else if( pField->flags & ( DT_FLOAT|DT_ANGLE ))
 	{
@@ -1036,10 +1045,10 @@ qboolean Delta_CompareField( delta_t *pField, void *from, void *to, float timeba
 	}
 	else if( pField->flags & DT_TIMEWINDOW_8 )
 	{
-		val_a = (*(float *)((byte *)from + pField->offset )) * 100.0f;
-		val_b = (*(float *)((byte *)to + pField->offset )) * 100.0f;
-		val_a -= (timebase * 100.0f);
-		val_b -= (timebase * 100.0f);
+		val_a = Q_rint((*(float *)((byte *)from + pField->offset )) * 100.0f );
+		val_b = Q_rint((*(float *)((byte *)to + pField->offset )) * 100.0f );
+		val_a -= Q_rint(timebase * 100.0f);
+		val_b -= Q_rint(timebase * 100.0f);
 		fromF = *((int *)&val_a);
 		toF = *((int *)&val_b);
 	}
@@ -1148,7 +1157,7 @@ qboolean Delta_WriteField( sizebuf_t *msg, delta_t *pField, void *from, void *to
 		#else
 		flValue = *(float *)((byte *)to + pField->offset );
 		#endif
-		flTime = (timebase * 100.0f) - (flValue * 100.0f);
+		flTime = Q_rint( timebase * 100.0f ) - Q_rint(flValue * 100.0f);
 		#if 1
 		iValue = (uint)fabs( flTime );
 		#else
@@ -1861,7 +1870,7 @@ qboolean MSG_ReadDeltaEntity( sizebuf_t *msg, entity_state_t *from, entity_state
 	}
 	else //  ENTITY_NORMAL or other (try predict type)
 	{
-		/* Omit connection drop on wromg data from server.
+		/* Omit connection drop on wrong data from server.
 		 * I know that it is very dirty,
 		 * but i don't know how to do it better.*/
 		if( to->entityType != ENTITY_NORMAL )
@@ -1901,7 +1910,7 @@ qboolean MSG_ReadDeltaEntity( sizebuf_t *msg, entity_state_t *from, entity_state
   
 =============================================================================
 */
-void Delta_AddEncoder( char *name, pfnDeltaEncode encodeFunc )
+void GAME_EXPORT Delta_AddEncoder( char *name, pfnDeltaEncode encodeFunc )
 {
 	delta_info_t	*dt;
 
@@ -1941,7 +1950,7 @@ int Delta_FindField( delta_t *pFields, const char *fieldname )
 	return -1;
 }
 
-void Delta_SetField( delta_t *pFields, const char *fieldname )
+void GAME_EXPORT Delta_SetField( delta_t *pFields, const char *fieldname )
 {
 	delta_info_t	*dt;
 	delta_t		*pField;
@@ -1961,7 +1970,7 @@ void Delta_SetField( delta_t *pFields, const char *fieldname )
 	}
 }
 
-void Delta_UnsetField( delta_t *pFields, const char *fieldname )
+void GAME_EXPORT Delta_UnsetField( delta_t *pFields, const char *fieldname )
 {
 	delta_info_t	*dt;
 	delta_t		*pField;
@@ -1981,7 +1990,7 @@ void Delta_UnsetField( delta_t *pFields, const char *fieldname )
 	}
 }
 
-void Delta_SetFieldByIndex( delta_t *pFields, int fieldNumber )
+void GAME_EXPORT Delta_SetFieldByIndex( delta_t *pFields, int fieldNumber )
 {
 	delta_info_t	*dt;
 
@@ -1992,7 +2001,7 @@ void Delta_SetFieldByIndex( delta_t *pFields, int fieldNumber )
 	dt->pFields[fieldNumber].bInactive = false;
 }
 
-void Delta_UnsetFieldByIndex( delta_t *pFields, int fieldNumber )
+void GAME_EXPORT Delta_UnsetFieldByIndex( delta_t *pFields, int fieldNumber )
 {
 	delta_info_t	*dt;
 

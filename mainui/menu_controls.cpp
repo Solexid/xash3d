@@ -423,7 +423,11 @@ static void UI_Controls_Callback( void *self, int event )
 	switch( item->id )
 	{
 	case ID_DONE:
+		CLIENT_COMMAND( FALSE, "trysaveconfig\n" );
+		UI_PopMenu();
+		break;
 	case ID_CANCEL:
+		CLIENT_COMMAND( TRUE, "exec keyboard\n");
 		UI_PopMenu();
 		break;
 	case ID_DEFAULTS:

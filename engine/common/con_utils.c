@@ -323,11 +323,12 @@ qboolean Cmd_GetMapList( const char *s, char *completedname, int length )
 	byte		buf[MAX_SYSPATH]; // 1 kb
 	int		i, nummaps;
 
-	t = FS_Search( va( "maps/%s*.bsp", s ), true, con_gamemaps->integer );
+	t = FS_Search( va( "maps/%s*.bsp", s ), false, con_gamemaps->integer );
 	if( !t ) return false;
 
-	FS_FileBase( t->filenames[0], matchbuf ); 
-	Q_strncpy( completedname, matchbuf, length );
+	FS_MapFileBase( t->filenames[0], matchbuf );
+	if( completedname && length )
+		Q_strncpy( completedname, matchbuf, length );
 	if( t->numfilenames == 1 ) return true;
 
 	for( i = 0, nummaps = 0; i < t->numfilenames; i++ )
@@ -422,7 +423,7 @@ qboolean Cmd_GetMapList( const char *s, char *completedname, int length )
 		}
 
 		if( f ) FS_Close(f);
-		FS_FileBase( t->filenames[i], matchbuf );
+		FS_MapFileBase( t->filenames[i], matchbuf );
 
 		switch( ver )
 		{
@@ -452,10 +453,13 @@ qboolean Cmd_GetMapList( const char *s, char *completedname, int length )
 	Mem_Free( t );
 
 	// cut shortestMatch to the amount common with s
-	for( i = 0; matchbuf[i]; i++ )
+	if( completedname && length )
 	{
-		if( Q_tolower( completedname[i] ) != Q_tolower( matchbuf[i] ))
-			completedname[i] = 0;
+		for( i = 0; matchbuf[i]; i++ )
+		{
+			if( Q_tolower( completedname[i] ) != Q_tolower( matchbuf[i] ))
+				completedname[i] = 0;
+		}
 	}
 	return true;
 }
@@ -1297,6 +1301,12 @@ void Cmd_WriteRenderVariables( file_t *f )
 	Cvar_LookupVars( CVAR_RENDERINFO, NULL, f, (void*)Cmd_WriteRenderCvar );
 }
 
+#define REPLACE_CONFIG(x) \
+FS_Delete( x ".bak" ); \
+FS_Rename( x, x ".bak" ); \
+FS_Delete( x ); \
+FS_Rename( x ".new", x );
+
 /*
 ===============
 Host_WriteConfig
@@ -1310,14 +1320,14 @@ void Host_WriteConfig( void )
 	file_t	*f;
 #ifndef XASH_DEDICATED
 	// if client not loaded, client cvars will lost
-	if( !clgame.hInstance )
+	if( !clgame.hInstance || Sys_CheckParm( "-nowriteconfig" ) )
 	{
 		MsgDev( D_NOTE, "Client not loaded, skipping config save!\n" );
 		return;
 	}
 
 	MsgDev( D_NOTE, "Host_WriteConfig()\n" );
-	f = FS_Open( "config.cfg", "w", true );
+	f = FS_Open( "config.cfg.new", "w", true );
 	if( f )
 	{
 		FS_Printf( f, "//=======================================================================\n");
@@ -1331,12 +1341,13 @@ void Host_WriteConfig( void )
 		FS_Printf( f, "exec userconfig.cfg\n" );
 
 		FS_Close( f );
+		REPLACE_CONFIG( "config.cfg" );
 	}
 	else MsgDev( D_ERROR, "Couldn't write config.cfg.\n" );
 
 	if( cls.initialized && ( cls.keybind_changed || !FS_FileExists( "keyboard.cfg", true ) ) )
 	{
-		f = FS_Open( "keyboard.cfg", "w", true );
+		f = FS_Open( "keyboard.cfg.new", "w", true );
 		if( f )
 		{
 			FS_Printf( f, "//=======================================================================\n");
@@ -1355,12 +1366,12 @@ void Host_WriteConfig( void )
 				FS_Printf( f, "+jlook\n" );
 
 			FS_Close( f );
+			REPLACE_CONFIG( "keyboard.cfg" );
 		}
 		else MsgDev( D_ERROR, "Couldn't write keyboard.cfg.\n" );
 	}
 	else
 		MsgDev( D_NOTE, "Keyboard configuration not changed\n" );
-	IN_TouchWriteConfig();
 #endif
 }
 
@@ -1409,7 +1420,12 @@ void Host_WriteOpenGLConfig( void )
 	file_t	*f;
 
 	MsgDev( D_NOTE, "Host_WriteGLConfig()\n" );
-	f = FS_Open( "opengl.cfg", "w", false );
+
+	if( Sys_CheckParm( "-nowriteconfig" ) )
+		return;
+
+	f = FS_Open( "opengl.cfg.new", "w", false );
+
 	if( f )
 	{
 		FS_Printf( f, "//=======================================================================\n" );
@@ -1417,7 +1433,8 @@ void Host_WriteOpenGLConfig( void )
 		FS_Printf( f, "//\t\t    opengl.cfg - archive of opengl extension cvars\n");
 		FS_Printf( f, "//=======================================================================\n" );
 		Cmd_WriteOpenGLVariables( f );
-		FS_Close( f );	
+		FS_Close( f );
+		REPLACE_CONFIG( "opengl.cfg" );
 	}                                                
 	else MsgDev( D_ERROR, "Can't update opengl.cfg.\n" );
 }
@@ -1437,7 +1454,12 @@ void Host_WriteVideoConfig( void )
 		return;
 
 	MsgDev( D_NOTE, "Host_WriteVideoConfig()\n" );
-	f = FS_Open( "video.cfg", "w", false );
+
+	if( Sys_CheckParm( "-nowriteconfig" ) )
+		return;
+
+	f = FS_Open( "video.cfg.new", "w", false );
+
 	if( f )
 	{
 		FS_Printf( f, "//=======================================================================\n" );
@@ -1445,7 +1467,8 @@ void Host_WriteVideoConfig( void )
 		FS_Printf( f, "//\t\tvideo.cfg - archive of renderer variables\n");
 		FS_Printf( f, "//=======================================================================\n" );
 		Cmd_WriteRenderVariables( f );
-		FS_Close( f );	
+		FS_Close( f );
+		REPLACE_CONFIG( "video.cfg" );
 	}                                                
 	else MsgDev( D_ERROR, "Can't update video.cfg.\n" );
 }

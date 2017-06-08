@@ -259,7 +259,7 @@ void SV_Impact( edict_t *e1, edict_t *e2, trace_t *trace )
 {
 	svgame.globals->time = sv.time;
 
-	if(( e1->v.flags|e2->v.flags ) & FL_SPECTATOR )
+	if(( e1->v.flags|e2->v.flags ) & FL_KILLME )
 		return;
 
 	if( e1->v.groupinfo && e2->v.groupinfo )
@@ -472,7 +472,7 @@ qboolean SV_CheckWater( edict_t *ent )
 		}
 	}
 
-	return (ent->v.waterlevel > 1);
+	return (ent->v.waterlevel > 1); //-V602
 }
 
 /*
@@ -1842,6 +1842,7 @@ Called from renderer for debug purposes
 */
 void SV_DrawDebugTriangles( void )
 {
+#ifndef XASH_DEDICATED
 	if( Host_IsDedicated() )
 		return;
 
@@ -1865,6 +1866,7 @@ void SV_DrawDebugTriangles( void )
 		pglDepthMask( GL_TRUE );
 		pglEnable( GL_BLEND );
 	}
+#endif
 }
 
 /*

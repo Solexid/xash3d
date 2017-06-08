@@ -20,7 +20,15 @@ GNU General Public License for more details.
 extern "C" {
 #endif
 
-#include <port.h>
+
+
+#ifdef __GNUC__
+#define _format(x) __attribute__((format(printf, x, x+1)))
+#else
+#define _format(x)
+#endif
+
+#include "port.h"
 
 #include <setjmp.h>
 #include <stdio.h>
@@ -32,35 +40,21 @@ extern "C" {
 #define MSGBOX2( x )	SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Host Error", x, NULL )
 #define MSGBOX3( x )	SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Host Recursive Error", x, NULL )
 #elif defined(__ANDROID__)
-#define MSGBOX( x )		Android_MessageBox("Xash Error", x )
+#define MSGBOX( x ) 	Android_MessageBox("Xash Error", x )
 #define MSGBOX2( x )	Android_MessageBox("Host Error", x )
 #define MSGBOX3( x )	Android_MessageBox("Host Recursive Error", x )
-
+#elif defined _WIN32
+#define MSGBOX( x ) 	MessageBox( NULL, x, "Xash Error", MB_OK|MB_SETFOREGROUND|MB_ICONSTOP )
+#define MSGBOX2( x )	MessageBox( host.hWnd, x, "Host Error", MB_OK|MB_SETFOREGROUND|MB_ICONSTOP )
+#define MSGBOX3( x )	MessageBox( host.hWnd, x, "Host Recursive Error", MB_OK|MB_SETFOREGROUND|MB_ICONSTOP )
 #else
 #define BORDER1 "======================================\n"
-#define MSGBOX( x )	 fprintf(stderr, BORDER1"Xash Error: %s\n"BORDER1,x)
-#define MSGBOX2( x )	 fprintf(stderr, BORDER1"Host Error: %s\n"BORDER1,x)
-#define MSGBOX3( x )	 fprintf(stderr, BORDER1"Host Recursive Error: %s\n"BORDER1,x)
+#define MSGBOX( x )		fprintf(stderr, BORDER1 "Xash Error: %s\n" BORDER1,x)
+#define MSGBOX2( x )	fprintf(stderr, BORDER1 "Host Error: %s\n" BORDER1,x)
+#define MSGBOX3( x )	fprintf(stderr, BORDER1 "Host Recursive Error: %s\n" BORDER1,x)
 #endif
-// basic typedefs
 
-typedef int		sound_t;
-typedef float		vec_t;
-typedef vec_t		vec2_t[2];
-typedef vec_t		vec3_t[3];
-typedef vec_t		vec4_t[4];
-typedef vec_t		quat_t[4];
-typedef byte		rgba_t[4];	// unsigned byte colorpack
-typedef byte		rgb_t[3];		// unsigned byte colorpack
-typedef vec_t		matrix3x4[3][4];
-typedef vec_t		matrix4x4[4][4];
-#if _MSC_VER == 1200
-typedef __int64 longtime_t; //msvc6
-#elif defined (XASH_SDL)
-typedef Uint64 longtime_t;
-#else
-typedef unsigned long long longtime_t;
-#endif
+#include "types.h"
 #include "const.h"
 
 #define ASSERT( exp )	if(!( exp )) Sys_Break( "assert failed at %s:%i\n", __FILE__, __LINE__ )
@@ -88,7 +82,7 @@ typedef struct dll_info_s
 	void		*link;	// hinstance of loading library
 } dll_info_t;
 
-void Sys_Sleep( int msec );
+void Sys_Sleep( unsigned int msec );
 double Sys_DoubleTime( void );
 char *Sys_GetClipboardData( void );
 char *Sys_GetCurrentUser( void );
@@ -120,14 +114,24 @@ int Sys_LogFileNo( void );
 //
 // sys_con.c
 //
-void Con_ShowConsole( qboolean show );
-void Con_WinPrint( const char *pMsg );
-void Con_InitConsoleCommands( void );
-void Con_CreateConsole( void );
-void Con_DestroyConsole( void );
-void Con_RegisterHotkeys( void );
-void Con_DisableInput( void );
-char *Con_Input( void );
+char *Sys_Input( void );
+void Sys_DestroyConsole( void );
+void Sys_CloseLog( void );
+void Sys_InitLog( void );
+void Sys_PrintLog( const char *pMsg );
+int Sys_LogFileNo( void );
+
+//
+// con_win.c
+//
+void Wcon_ShowConsole( qboolean show );
+void Wcon_Print( const char *pMsg );
+void Wcon_Init( void );
+void Wcon_CreateConsole( void );
+void Wcon_DestroyConsole( void );
+void Wcon_DisableInput( void );
+void Wcon_Clear( void );
+char *Wcon_Input( void );
 
 // text messages
 void Msg( const char *pMsg, ... ) _format(1);

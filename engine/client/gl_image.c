@@ -22,7 +22,6 @@ GNU General Public License for more details.
 
 #define TEXTURES_HASH_SIZE	64
 
-static rgbdata_t	*R_LoadImage( char **buffer, const char *name, const byte *buf, size_t size, int *samples, texFlags_t *flags );
 static int	r_textureMinFilter = GL_LINEAR_MIPMAP_LINEAR;
 static int	r_textureMagFilter = GL_LINEAR;
 static gltexture_t	r_textures[MAX_TEXTURES];
@@ -122,7 +121,7 @@ R_GetTexture
 */
 gltexture_t *R_GetTexture( GLenum texnum )
 {
-	ASSERT( texnum >= 0 && texnum < MAX_TEXTURES );
+	ASSERT( texnum < MAX_TEXTURES );
 	return &r_textures[texnum];
 }
 
@@ -135,8 +134,7 @@ Just for debug (r_showtextures uses it)
 */
 void GL_SetTextureType( GLenum texnum, GLenum type )
 {
-	if( texnum <= 0 ) return;
-	ASSERT( texnum >= 0 && texnum < MAX_TEXTURES );
+	ASSERT( texnum < MAX_TEXTURES );
 	r_textures[texnum].texType = type;
 }
 
@@ -375,7 +373,7 @@ void R_TextureList_f( void )
 	int		i, texCount, bytes = 0;
 
 	Msg( "\n" );
-	Msg("      -w-- -h-- -size- -fmt- type -filter -wrap-- -name--------\n" );
+	Msg("      -w-- -h-- -size- -fmt- type -data-- -encode-- -wrap-- -name--------\n" );
 
 	for( i = texCount = 0, image = r_textures; i < r_numTextures; i++, image++ )
 	{
@@ -517,20 +515,41 @@ void R_TextureList_f( void )
 		}
 
 		if( image->flags & TF_NORMALMAP )
-			Msg( "normal " );
-		else if( image->flags & TF_NOMIPMAP )
-			Msg( "linear " );
-		if( image->flags & TF_NEAREST )
-			Msg( "nearest" );
-		else Msg( "default" );
+			Msg( "normal  " );
+		else Msg( "diffuse " );
+
+		switch( image->encode )
+		{
+		case DXT_ENCODE_COLOR_YCoCg:
+			Msg( "YCoCg     " );
+			break;
+		case DXT_ENCODE_NORMAL_AG_ORTHO:
+			Msg( "ortho     " );
+			break;
+		case DXT_ENCODE_NORMAL_AG_STEREO:
+			Msg( "stereo    " );
+			break;
+		case DXT_ENCODE_NORMAL_AG_PARABOLOID:
+			Msg( "parabolic " );
+			break;
+		case DXT_ENCODE_NORMAL_AG_QUARTIC:
+			Msg( "quartic   " );
+			break;
+		case DXT_ENCODE_NORMAL_AG_AZIMUTHAL:
+			Msg( "azimuthal " );
+			break;
+		default:
+			Msg( "default   " );
+			break;
+		}
 
 		if( image->flags & TF_CLAMP )
-			Msg( " clamp  " );
+			Msg( "clamp  " );
 		else if( image->flags & TF_BORDER )
-			Msg( " border " );
+			Msg( "border " );
 		else if( image->flags & TF_ALPHA_BORDER )
-			Msg( " aborder" );
-		else Msg( " repeat " );
+			Msg( "aborder" );
+		else Msg( "repeat " );
 		Msg( "  %s\n", image->name );
 	}
 
@@ -1137,6 +1156,7 @@ static void GL_UploadTextureDXT( rgbdata_t *pic, gltexture_t *tex, qboolean subI
 	tex->flags &= ~TF_KEEP_8BIT;
 	tex->flags &= ~TF_KEEP_RGBDATA;
 	tex->flags |= TF_NOPICMIP;
+	tex->encode = pic->encode; // share encode method
 
 	samples = GL_CalcTextureSamples( pic->flags );
 
@@ -1217,12 +1237,13 @@ static void GL_UploadTextureDXT( rgbdata_t *pic, gltexture_t *tex, qboolean subI
 
 		for( j = 0; j < numMips; j++ )
 		{
+			width = max( 1, ( pic->width >> j ));
+			height = max( 1, ( pic->height >> j ));
 			texsize = Image_DXTGetLinearSize( pic->type, width, height, depth );
 			if( ImageDXT( pic->type ))
 				GL_TextureImageDXT( inFormat, glTarget, i, j, width, height, depth, subImage, texsize, buf );
 			else GL_TextureImage( inFormat, tex->format, glTarget, i, j, width, height, depth, subImage, texsize, buf );
 
-			width = (width+1)>>1, height = (height+1)>>1;
 			buf += texsize; // move pointer
 
 			// catch possible errors
@@ -1464,7 +1485,7 @@ int GL_LoadTexture( const char *name, const byte *buf, size_t size, int flags, i
 	if( !name || !name[0] || !glw_state.initialized )
 		return 0;
 
-	if( Q_strlen( name ) >= sizeof( r_textures->name ))
+	if( Q_strlen( name ) >= sizeof( r_textures[0].name ))
 	{
 		MsgDev( D_ERROR, "GL_LoadTexture: too long name %s\n", name );
 		return 0;
@@ -1492,38 +1513,12 @@ int GL_LoadTexture( const char *name, const byte *buf, size_t size, int flags, i
 	// set some image flags
 	Image_SetForceFlags( picFlags );
 
-	if( flags & TF_IMAGE_PROGRAM )
-	{
-		char	buffer[256], token[256];
-		char	*script;
-		int	samples;
+	// HACKHACK: get rid of black vertical line on a 'BlackMesa map'
+	if( !Q_strcmp( name, "#lab1_map1.mip" ) || !Q_strcmp( name, "#lab1_map2.mip" ))
+		flags |= TF_NEAREST;
 
-		// create quoted string on a spec symbols
-		if( name[0] == '#' || name[0] == '{' )
-			Q_snprintf( buffer, sizeof( buffer ), "\"%s\"", name );
-		else Q_strncpy( buffer, name, sizeof( buffer ));
-		script = &buffer[0];
-
-		if(( script = COM_ParseFile( script, token )) == NULL )
-			return 0;
-
-		// parse image program
-		pic = R_LoadImage( &script, token, buf, size, &samples, (texFlags_t*)&flags );
-		if( !pic ) return 0; // couldn't loading image
-
-		// recalc image samples here
-		pic->flags &= ~(IMAGE_HAS_COLOR|IMAGE_HAS_ALPHA);
-		pic->flags |= GL_ImageFlagsFromSamples( samples );
-	}
-	else
-	{
-		// HACKHACK: get rid of black vertical line on a 'BlackMesa map'
-		if( !Q_strcmp( name, "#lab1_map1.mip" ) || !Q_strcmp( name, "#lab1_map2.mip" ))
-			flags |= TF_NEAREST;
-
-		pic = FS_LoadImage( name, buf, size );
-		if( !pic ) return 0; // couldn't loading image
-	}
+	pic = FS_LoadImage( name, buf, size );
+	if( !pic ) return 0; // couldn't loading image
 
 	// force upload texture as RGB or RGBA (detail textures requires this)
 	if( flags & TF_FORCE_COLOR ) pic->flags |= IMAGE_HAS_COLOR;
@@ -1579,7 +1574,7 @@ int GL_LoadTextureInternal( const char *name, rgbdata_t *pic, texFlags_t flags, 
 	if( !name || !name[0] || !glw_state.initialized )
 		return 0;
 
-	if( Q_strlen( name ) >= sizeof( r_textures->name ))
+	if( Q_strlen( name ) >= sizeof( r_textures[0].name ) )
 	{
 		MsgDev( D_ERROR, "GL_LoadTexture: too long name %s\n", name );
 		return 0;
@@ -1764,7 +1759,7 @@ int GL_FindTexture( const char *name )
 	if( !name || !name[0] || !glw_state.initialized )
 		return 0;
 
-	if( Q_strlen( name ) >= sizeof( r_textures->name ))
+	if( Q_strlen( name ) >= sizeof( r_textures[0].name ) )
 	{
 		MsgDev( D_ERROR, "GL_FindTexture: too long name %s\n", name );
 		return 0;
@@ -1801,7 +1796,7 @@ void GL_FreeImage( const char *name )
 	if( !name || !name[0] || !glw_state.initialized )
 		return;
 
-	if( Q_strlen( name ) >= sizeof( r_textures->name ))
+	if( Q_strlen( name ) >= sizeof( r_textures[0].name ) )
 	{
 		MsgDev( D_ERROR, "GL_FreeImage: too long name %s\n", name );
 		return;
@@ -1834,7 +1829,7 @@ void GL_FreeTexture( GLenum texnum )
 	ASSERT( texnum > 0 && texnum < MAX_TEXTURES );
 	R_FreeImage( &r_textures[texnum] );
 }
-
+#if 0 // Uncle Mike removed this
 /*
 =======================================================================
 
@@ -3788,7 +3783,7 @@ static rgbdata_t *R_LoadImage( char **script, const char *name, const byte *buf,
 	}
 	return NULL;
 }
-
+#endif
 /*
 ================
 R_FreeImage
@@ -4561,9 +4556,9 @@ void R_InitImages( void )
 	Q_memset( r_texturesHashTable, 0, sizeof( r_texturesHashTable ));
 
 	// create unused 0-entry
-	Q_strncpy( r_textures->name, "*unused*", sizeof( r_textures->name ));
-	hash = Com_HashKey( r_textures->name, TEXTURES_HASH_SIZE );
-	r_textures->nextHash = r_texturesHashTable[hash];
+	Q_strncpy( r_textures[0].name, "*unused*", sizeof( r_textures[0].name ));
+	hash = Com_HashKey( r_textures[0].name, TEXTURES_HASH_SIZE );
+	r_textures[0].nextHash = r_texturesHashTable[hash];
 	r_texturesHashTable[hash] = r_textures;
 	r_numTextures = 1;
 

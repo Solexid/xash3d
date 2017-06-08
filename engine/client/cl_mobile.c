@@ -18,25 +18,21 @@ GNU General Public License for more details.
 #include "common.h"
 #include "client.h"
 #include "mobility_int.h"
-#include "events.h"
 #include "library.h"
 #include "gl_local.h"
 #include "touch.h"
-#if defined(__ANDROID__)
 
-//#include "platform/android/android-gameif.h"
+#if defined(__ANDROID__)
 #ifdef XASH_SDL
 #include "SDL_system.h"
 #endif
+#include "platform/android/android-main.h"
 #endif
 
-// we don't have our controls at this time
 mobile_engfuncs_t *gMobileEngfuncs;
 
 convar_t *vibration_length;
 convar_t *vibration_enable;
-
-void Android_Vibrate( float life, char flags );
 
 static void pfnVibrate( float life, char flags )
 {
@@ -49,7 +45,7 @@ static void pfnVibrate( float life, char flags )
 		return;
 	}
 
-	MsgDev( D_NOTE, "Vibrate: %f %d\n", life, flags );
+	//MsgDev( D_NOTE, "Vibrate: %f %d\n", life, flags );
 
 	// here goes platform-specific backends
 #ifdef __ANDROID__
@@ -99,6 +95,20 @@ static int pfnDrawScaledCharacter( int x, int y, int number, int r, int g, int b
 	return width;
 }
 
+static void *pfnGetNativeObject( const char *obj )
+{
+	if( !obj )
+		return NULL;
+
+	// Backend should handle NULL
+	// Backend should consider that obj is case-sensitive
+#ifdef __ANDROID__
+	return Android_GetNativeObject( obj );
+#else
+	return NULL;
+#endif
+}
+
 static mobile_engfuncs_t gpMobileEngfuncs =
 {
 	MOBILITY_API_VERSION,
@@ -111,7 +121,9 @@ static mobile_engfuncs_t gpMobileEngfuncs =
 	(void*)IN_TouchSetClientOnly,
 	IN_TouchResetDefaultButtons,
 	pfnDrawScaledCharacter,
-	Sys_Warn
+	Sys_Warn,
+	pfnGetNativeObject,
+	ID_SetCustomClientID
 };
 
 void Mobile_Init( void )
@@ -130,12 +142,12 @@ void Mobile_Init( void )
 		MsgDev( D_INFO, "Mobility interface not found\n");
 	}
 
-	Cmd_AddCommand( "vibrate", Vibrate_f, "Vibrate for specified time");
+	Cmd_AddCommand( "vibrate", (xcommand_t)Vibrate_f, "Vibrate for specified time");
 	vibration_length = Cvar_Get( "vibration_length", "1.0", CVAR_ARCHIVE, "Vibration length");
 	vibration_enable = Cvar_Get( "vibration_enable", "1", CVAR_ARCHIVE, "Enable vibration");
 }
 
-void Mobile_Destroy( void )
+void Mobile_Shutdown( void )
 {
 	Cmd_RemoveCommand( "vibrate" );
 }
