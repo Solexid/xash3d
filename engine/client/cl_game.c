@@ -306,6 +306,9 @@ adjust text by x pos
 static int CL_AdjustXPos( float x, int width, int totalWidth )
 {
 	int	xPos;
+	float scale;
+
+	scale = scr_width->value / (float)clgame.scrInfo.iWidth;
 
 	if( x == -1 )
 	{
@@ -324,7 +327,7 @@ static int CL_AdjustXPos( float x, int width, int totalWidth )
 	else if( xPos < 0 )
 		xPos = 0;
 
-	return xPos;
+	return xPos * scale;
 }
 
 /*
@@ -337,6 +340,9 @@ adjust text by y pos
 static int CL_AdjustYPos( float y, int height )
 {
 	int	yPos;
+	float scale;
+
+	scale = scr_height->value / (float)clgame.scrInfo.iHeight;
 
 	if( y == -1 ) // centered?
 	{
@@ -356,7 +362,7 @@ static int CL_AdjustYPos( float y, int height )
 	else if( yPos < 0 )
 		yPos = 0;
 
-	return yPos;
+	return yPos * scale;
 }
 
 /*
@@ -371,6 +377,7 @@ void CL_CenterPrint( const char *text, float y )
 	byte	*s;
 	int	width = 0;
 	int	length = 0;
+	float yscale = 1;
 
 	clgame.centerPrint.lines = 1;
 	clgame.centerPrint.totalWidth = 0;
@@ -388,7 +395,7 @@ void CL_CenterPrint( const char *text, float y )
 				clgame.centerPrint.totalWidth = width;
 			width = 0;
 		}
-		else width += clgame.scrInfo.charWidths[*s];
+		else width += clgame.scrInfo.charWidths[*s] * yscale;
 		s++;
 		length++;
 	}
@@ -904,7 +911,10 @@ void CL_DrawCrosshair( void )
 	width = crosshair_state.rcCrosshair.right - crosshair_state.rcCrosshair.left;
 	height = crosshair_state.rcCrosshair.bottom - crosshair_state.rcCrosshair.top;
 
-	x = clgame.scrInfo.iWidth / 2; 
+	if (host.vr_mode)
+		 {x = clgame.scrInfo.iWidth / 4; }
+	else
+		 {x = clgame.scrInfo.iWidth / 2; }
 	y = clgame.scrInfo.iHeight / 2;
 
 	// g-cont - cl.refdef.crosshairangle is the autoaim angle.
@@ -932,6 +942,13 @@ void CL_DrawCrosshair( void )
 	SPR_EnableScissor( x - 0.5f * width, y - 0.5f * height, width, height );
 	SPR_DrawGeneric( 0, x - 0.5f * width, y - 0.5f * height, -1, -1, &crosshair_state.rcCrosshair );
 	SPR_DisableScissor();
+	if (host.vr_mode)
+		 {
+		SPR_EnableScissor((clgame.scrInfo.iWidth - x) - 0.5f * width, y - 0.5f * height, width, height);
+		SPR_DrawGeneric(0, (clgame.scrInfo.iWidth - x) - 0.5f * width, y - 0.5f * height, -1, -1, &crosshair_state.rcCrosshair);
+		SPR_DisableScissor();
+		
+			}
 }
 
 /*
@@ -3204,7 +3221,7 @@ int TriWorldToScreen( float *world, float *screen )
 
 	retval = R_WorldToScreen( world, screen );
 
-	screen[0] =  0.5f * screen[0] * (float)cl.refdef.viewport[2];
+	screen[0] = 0.5f * (float)cl.refdef.viewport[2];
 	screen[1] = -0.5f * screen[1] * (float)cl.refdef.viewport[3];
 	screen[0] += 0.5f * (float)cl.refdef.viewport[2];
 	screen[1] += 0.5f * (float)cl.refdef.viewport[3];
@@ -3583,14 +3600,6 @@ void GAME_EXPORT VGui_ViewportPaintBackground( int extents[4] )
 	// stub
 }
 
-#ifndef XASH_VGUI
-void *VGui_GetPanel()
-{
-	// stub
-	return NULL;
-}
-#endif
-
 /*
 =================
 IVoiceTweak implementation
@@ -3901,7 +3910,7 @@ static cl_enginefunc_t gEngfuncs =
 	pfnGetLevelName,
 	pfnGetScreenFade,
 	pfnSetScreenFade,
-	VGui_GetPanel,
+	pfnVGui_GetPanel,
 	VGui_ViewportPaintBackground,
 	(void*)COM_LoadFile,
 	COM_ParseFile,
@@ -3980,9 +3989,7 @@ void CL_UnloadProgs( void )
 	Cvar_FullSet( "host_clientloaded", "0", CVAR_INIT );
 
 	Com_FreeLibrary( clgame.hInstance );
-#ifdef XASH_VGUI
 	VGui_Shutdown();
-#endif
 	Mem_FreePool( &cls.mempool );
 	Mem_FreePool( &clgame.mempool );
 	Q_memset( &clgame, 0, sizeof( clgame ));
@@ -4015,9 +4022,7 @@ qboolean CL_LoadProgs( const char *name )
 	// NOTE: important stuff!
 	// vgui must startup BEFORE loading client.dll to avoid get error ERROR_NOACESS
 	// during LoadLibrary
-#ifdef XASH_VGUI
 	VGui_Startup (menu.globals->scrWidth, menu.globals->scrHeight);
-#endif
 	
 	clgame.hInstance = Com_LoadLibrary( name, false );
 	if( !clgame.hInstance ) return false;

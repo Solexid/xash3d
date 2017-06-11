@@ -12,6 +12,7 @@ void *Android_GetNativeObject( const char *obj );
 //
 // android_nosdl.c
 //
+void GetTrackData( vec3_t values);
 void Android_SwapBuffers();
 void Android_GetScreenRes( int *width, int *height );
 void Android_Init( void );

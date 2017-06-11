@@ -24,11 +24,15 @@ from your version.
 */
 #ifndef VGUI_MAIN_H
 #define VGUI_MAIN_H
-#ifdef XASH_VGUI
 
 #define Assert(x)
 
-#include "system.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <string.h>
+#endif
+
 #include "vgui_api.h"
 #include "utlvector.h"
 #include "utlrbtree.h"
@@ -43,7 +47,8 @@ from your version.
 #include<VGUI_MouseCode.h>
 #include<VGUI_KeyCode.h>
 
-
+namespace vgui_support
+{
 extern vguiapi_t *g_api;
 
 using namespace vgui;
@@ -189,16 +194,6 @@ class CEngineApp : public App
 public:
 	CEngineApp( bool externalMain = true ) : App( externalMain ) { }
 	virtual void main( int argc, char* argv[] ) { } // stub
-	virtual void setCursorPos( int x, int y ); // we need to recompute abs position to window
-	virtual void getCursorPos( int &x,int &y );
-};
-
-class CEnginePanel : public Panel
-{
-public:
-	virtual SurfaceBase* getSurfaceBase( void );
-	virtual App* getApp( void );
-	virtual void setVisible(bool state);
 };
 
 //
@@ -223,9 +218,8 @@ qboolean ClipRect( const vpoint_t &inUL, const vpoint_t &inLR, vpoint_t *pOutUL,
 extern FontCache *g_FontCache;
 
 
-extern CEnginePanel	*rootpanel;
 extern CEngineSurface	*surface;
-extern CEngineApp          *pApp;
-
-#endif
+extern Panel *root;
+}
+using namespace vgui_support;
 #endif//VGUI_MAIN_H

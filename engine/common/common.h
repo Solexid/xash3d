@@ -133,7 +133,7 @@ typedef enum
 #include "com_model.h"
 #include "crtlib.h"
 
-#define XASH_VERSION	"0.19"		// engine current version
+#define XASH_VERSION	"0.19.1"		// engine current version
 // since this fork have own version, this is just left for compability
 #define BASED_VERSION	0.98f
 
@@ -164,10 +164,10 @@ typedef enum
 #define MAX_STATIC_ENTITIES	512	// static entities that moved on the client when level is spawn
 
 // filesystem flags
-#define FS_STATIC_PATH	1	// FS_ClearSearchPath will be ignore this path
-#define FS_NOWRITE_PATH	2	// default behavior - last added gamedir set as writedir. This flag disables it
-#define FS_GAMEDIR_PATH	4	// just a marker for gamedir path
-#define FS_CUSTOM_PATH	8	// map search allowed
+#define FS_STATIC_PATH	BIT(0)	// FS_ClearSearchPath will be ignore this path
+#define FS_NOWRITE_PATH	BIT(1)	// default behavior - last added gamedir set as writedir. This flag disables it
+#define FS_GAMEDIR_PATH	BIT(2)	// just a marker for gamedir path
+#define FS_CUSTOM_PATH	BIT(3)	// map search allowed
 
 #define GI              SI.GameInfo
 #define FS_Gamedir()	SI.GameInfo->gamedir
@@ -254,7 +254,7 @@ typedef struct gameinfo_s
 	int		max_tents;	// min temp ents is 300, max is 2048
 	int		max_beams;	// min beams is 64, max beams is 512
 	int		max_particles;	// min particles is 4096, max particles is 32768
-	qboolean	added;
+	qboolean added;
 } gameinfo_t;
 
 typedef struct sysinfo_s
@@ -381,7 +381,6 @@ typedef struct host_parm_s
 	qboolean		con_showalways;	// show console always (developer and dedicated)
 	qboolean		change_game;	// initialize when game is changed
 	qboolean		mouse_visible;	// vgui override cursor control
-	qboolean		input_enabled;	// vgui override mouse & keyboard input
 	qboolean		shutdown_issued;	// engine is shutting down
 	qboolean		decal_loading;	// nasty hack to tell imagelib about decal
 	qboolean		overview_loading;	// another nasty hack to tell imagelib about ovierview
@@ -391,8 +390,11 @@ typedef struct host_parm_s
 	qboolean		skip_configs;	// skip config save during Host_Shutdown
 	double	force_draw_version_time; // time when disable force_draw_version
 
+	char		rodir[256]; // readonly root
 	char		rootdir[256];	// member root directory
 	char		gamefolder[64];	// it's a default gamefolder	
+
+
 	byte		*imagepool;	// imagelib mempool
 	byte		*soundpool;	// soundlib mempool
 
@@ -409,6 +411,7 @@ typedef struct host_parm_s
 	int		numsounds;
 	qboolean enabledll;
 	qboolean textmode;
+	qboolean	vr_mode;	// vr mode by Solexid
 } host_parm_t;
 
 extern host_parm_t	host;
@@ -439,8 +442,10 @@ wfile_t *W_Open( const char *filename, const char *mode );
 byte *W_LoadLump( wfile_t *wad, const char *lumpname, size_t *lumpsizeptr, const char type );
 void W_Close( wfile_t *wad );
 searchpath_t *FS_FindFile( const char *name, int *index, qboolean gamedironly );
+searchpath_t *FS_GetSearchPaths( void );
 file_t *FS_OpenFile( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly );
 byte *FS_LoadFile( const char *path, fs_offset_t *filesizeptr, qboolean gamedironly );
+byte *FS_LoadDirectFile( const char *path, fs_offset_t *filesizeptr );
 qboolean FS_WriteFile( const char *filename, const void *data, fs_offset_t len );
 int COM_FileSize( const char *filename );
 void COM_FixSlashes( char *pname );
@@ -470,6 +475,9 @@ int FS_Getc( file_t *file );
 qboolean FS_Eof( file_t *file );
 fs_offset_t FS_FileLength( file_t *f );
 void FS_Rescan( void );
+qboolean FS_SysFileExists( const char *path, qboolean caseinsensitive );
+void FS_CreatePath( char *path );
+
 
 //
 // network.c

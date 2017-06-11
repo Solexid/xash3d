@@ -18,8 +18,14 @@
 #pragma once
 #endif
 
+#include "port.h"
 #include <string.h>
-#ifdef _WIN32
+#ifdef NO_STL
+template <class T>
+void *operator new(size_t count, T *ptr) {
+return ptr;
+}
+#elif defined _WIN32
 #include <new.h>
 #else
 #include <new>

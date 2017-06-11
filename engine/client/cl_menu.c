@@ -689,6 +689,9 @@ for drawing playermodel previews
 static void pfnRenderScene( const ref_params_t *fd )
 {
 	if ( !cls.initialized ) return;
+	if( cls.state < ca_connecting )
+		userinfo->modified = true;
+
 	// to avoid division by zero
 	if( !fd || fd->fov_x <= 0.0f || fd->fov_y <= 0.0f )
 		return;
@@ -1036,18 +1039,9 @@ qboolean UI_LoadProgs( void )
 
 	// setup globals
 	menu.globals = &gpGlobals;
-#if TARGET_OS_IPHONE || defined __EMSCRIPTEN__
+#ifdef XASH_INTERNAL_GAMELIBS
 	if(!( menu.hInstance = Com_LoadLibrary( "menu", false )))
 		return false;
-#elif defined (__ANDROID__)
-	char menulib[256];
-	Q_snprintf( menulib, 256, "%s/%s", getenv("XASH3D_GAMELIBDIR"), MENUDLL );
-	if(!( menu.hInstance = Com_LoadLibrary( menulib, false )))
-	{
-		Q_snprintf( menulib, 256, "%s/%s", getenv("XASH3D_ENGLIBDIR"), MENUDLL );
-		if(!( menu.hInstance = Com_LoadLibrary( menulib, false )))
-			return false;
-	}
 #else
 	if(!( menu.hInstance = Com_LoadLibrary( va( "%s/" MENUDLL, GI->dll_path ), false )))
 	{

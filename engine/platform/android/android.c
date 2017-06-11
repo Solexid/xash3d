@@ -22,9 +22,28 @@ int SDL_main( int argc, char **argv )
 				 Functions called by JNI
 *******************************************************************************/
 
-
+static float TrackData[3];
 /* Called before SDL_main() to initialize JNI bindings in SDL library */
 extern void SDL_Android_Init(JNIEnv* env, jclass cls);
+
+
+JNIEXPORT void JNICALL Java_org_libsdl_app_SDLActivity_onTrackTrigger
+ ( JNIEnv* env, jclass clazz,jfloat x, jfloat y, jfloat z)
+ {
+ TrackData[0] = x;
+  TrackData[1] = y;
+  TrackData[2] = z;
+ }
+ void GetTrackData( vec3_t values)
+ {
+  int i;
+  for (i = 0; i < 3; ++i )
+  {
+  values[ i ] = TrackData[ i ];
+  }
+ 
+ 
+ }
 
 /* Start up the SDL app */
 int Java_org_libsdl_app_SDLActivity_nativeInit(JNIEnv* env, jclass cls, jobject array)

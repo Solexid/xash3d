@@ -109,7 +109,7 @@ static char *VOX_GetDirectory( char *szpath, char *psz )
 // CONSIDER: sort strings in g_Sentences and do binary search.
 char *VOX_LookupString( const char *pSentenceName, int *psentencenum )
 {
-	int	i;
+	int	i=0;
 	sentenceEntry_s *sentenceEntry;
 
 	if( Q_isdigit( pSentenceName ) ) i = Q_atoi( pSentenceName );
@@ -477,7 +477,10 @@ void VOX_LoadSound( channel_t *pchan, const char *pszin )
 
 	// lookup actual string in g_Sentences, 
 	// set pointer to string data
-	psz = VOX_LookupString( pszin, NULL );
+	if( pszin[0] == '#' )
+	    psz = (char *)( pszin + 1 );
+	else
+	    psz = VOX_LookupString( pszin, NULL );
 
 	if( !psz )
 	{

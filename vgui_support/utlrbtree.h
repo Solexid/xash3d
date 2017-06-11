@@ -14,6 +14,7 @@
 #ifndef UTLRBTREE_H
 #define UTLRBTREE_H
 
+#include "port.h"
 #include "utlmemory.h"
 //-----------------------------------------------------------------------------
 // Tool to generate a default compare function for any type that implements
@@ -427,15 +428,11 @@ inline void  CUtlRBTree<T, I>::SetRightChild( I i, I child  )
 //-----------------------------------------------------------------------------
 // Gets at the links
 //-----------------------------------------------------------------------------
-
+static const int s_Sentinel[4] = {-1, -1, -1, 1};
 template <class T, class I>
 inline typename CUtlRBTree<T, I>::Links_t const &CUtlRBTree<T, I>::Links( I i ) const
 {
 	// Sentinel node, makes life easier
-	Links_t s_Sentinel =
-	{ 
-		InvalidIndex(), InvalidIndex(), InvalidIndex(), CUtlRBTree<T, I>::BLACK 
-	};
 	
 	return (i != InvalidIndex()) ? *(Links_t*)&m_Elements[i] :
 								 *(Links_t*)&s_Sentinel; 

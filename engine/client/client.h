@@ -501,11 +501,6 @@ typedef struct
 	int		envshot_viewsize;		// override cvar
 	qboolean		envshot_disable_vis;	// disable VIS on server while makes an envshots
 	string		shotname;
-
-	// download info
-	int		downloadcount;
-	int		downloadfileid;
-
 	// demo loop control
 	int		demonum;			// -1 = don't play demos
 	int		olddemonum;		// restore playing
@@ -529,6 +524,12 @@ typedef struct
 	qboolean splitcompress;			// enabled only on server->client netchan
 	qboolean need_save_config;
 } client_static_t;
+
+
+	// download info
+extern int		downloadcount;
+extern int		downloadfileid;
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -586,6 +587,8 @@ extern convar_t	*userinfo;
 extern convar_t	*hltv;
 extern convar_t *m_ignore;
 extern convar_t *hud_utf8;
+extern convar_t *vgui_utf8;
+extern convar_t *ui_renderworld;
 
 
 //=============================================================================
@@ -738,7 +741,12 @@ void SCR_NetSpeeds( void );
 void SCR_RSpeeds( void );
 void SCR_DrawFPS( void );
 void SCR_DrawPos( void );
+
+//
+// cl_netgraph.c
+//
 void SCR_DrawNetGraph( void );
+void CL_InitNetgraph( void );
 
 //
 // cl_view.c

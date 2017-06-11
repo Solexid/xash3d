@@ -27,7 +27,7 @@ project (XASH3D)
 # USER DEFINES \
 ################\
 
-set (XASH3D_VERSION 0.19)
+set (XASH3D_VERSION 0.19.1)
 
 set (HL_SDK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/hlsdk/)
 
@@ -35,7 +35,6 @@ include( CMakeDependentOption )
 
 # Servers must choose this
 option(XASH_DEDICATED "Enable dedicated build. Servers must choose this." OFF)
-option(XASH_64BIT "Enable experimental 64-bit build. Note that you must recompile game for 64 bit." OFF)
 
 # Windows only. Enable it by default for Windows.
 cmake_dependent_option(XASH_IPX "Enable IPX support for networking. Windows only." ON "WIN32" OFF)
@@ -55,6 +54,9 @@ option(XASH_STATIC "Static build. Implicitly enables XASH_SINGLE_BINARY." OFF)
 # Shared library loader implementation. Must be checked one of these or both.
 cmake_dependent_option(XASH_LIBDL "Enable libdl use. POSIX only." ON "NOT WIN32" OFF)
 option(XASH_DLL_LOADER "Enable DLL loading on x86 Linux/*nix." OFF)
+
+# Enable 64-bit build of Xash3D FWGS Engine.
+option(XASH_64BIT "Enable experimental 64-bit build. Note that you must recompile game for 64 bit." OFF)
 
 # Desktop-version options
 if(XASH_DEDICATED) 
@@ -99,7 +101,11 @@ endif()
 
 
 if(NOT DEFINED LIB_INSTALL_DIR)
-    set(LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX}")
+	if( WIN32 )
+		set( LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_BUILD_TYPE}" )
+	else()
+		set(LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX}")
+	endif()
 endif()
 if(NOT DEFINED LIBEXEC_INSTALL_DIR)
     set(LIBEXEC_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/libexec")
@@ -125,7 +131,9 @@ endif()
 
 add_subdirectory (engine)
 
-install(FILES "xash3d.sh"
-    DESTINATION ${BIN_INSTALL_DIR}
-    RENAME "xash3d"
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+if(NOT WIN32)
+	install(FILES "xash3d.sh"
+	    DESTINATION ${BIN_INSTALL_DIR}
+	    RENAME "xash3d"
+	    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE 	GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()

@@ -25,7 +25,7 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="game.cpp">
+    <ClCompile Include="xash.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

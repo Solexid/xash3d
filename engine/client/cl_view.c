@@ -63,8 +63,14 @@ void V_SetupRefDef( void )
 	cl.refdef.nextView = 0;
 
 	SCR_AddDirtyPoint( 0, 0 );
-	SCR_AddDirtyPoint( scr_width->integer - 1, scr_height->integer - 1 );
-
+	if (host.vr_mode)
+	{
+		SCR_AddDirtyPoint((scr_width->integer - 1) / 2, scr_height->integer - 1);
+	}
+	else
+	{
+		SCR_AddDirtyPoint(scr_width->integer - 1, scr_height->integer - 1);
+	}
 	if( cl.refdef.viewsize >= 120 )
 		sb_lines = 0;		// no status bar at all
 	else if( cl.refdef.viewsize >= 110 )
@@ -82,6 +88,10 @@ void V_SetupRefDef( void )
 		cl.refdef.viewport[3] = scr_height->integer;
 
 	cl.refdef.viewport[0] = (scr_width->integer - cl.refdef.viewport[2]) / 2;
+	if (host.vr_mode)
+	{
+		cl.refdef.viewport[2] = ((scr_width->integer) / 2) * size / 100;
+	}
 	cl.refdef.viewport[1] = (scr_height->integer - sb_lines - cl.refdef.viewport[3]) / 2;
 
 	cl.scr_fov = bound( 10.0f, cl.scr_fov, 150.0f );
@@ -91,7 +101,7 @@ void V_SetupRefDef( void )
 	cl.refdef.fov_y = V_CalcFov( &cl.refdef.fov_x, cl.refdef.viewport[2], cl.refdef.viewport[3] );
 
 	// adjust FOV for widescreen
-	if( glState.wideScreen && r_adjust_fov->integer )
+	if (glState.wideScreen && r_adjust_fov->integer && !host.vr_mode)
 		V_AdjustFov( &cl.refdef.fov_x, &cl.refdef.fov_y, cl.refdef.viewport[2], cl.refdef.viewport[3], false );
 
 	if( CL_IsPredicted( ) && !cl.refdef.demoplayback )
@@ -310,8 +320,65 @@ void V_CalcRefDef( void )
 	do
 	{
 		clgame.dllFuncs.pfnCalcRefdef( &cl.refdef );
-		V_MergeOverviewRefdef( &cl.refdef );
-		R_RenderFrame( &cl.refdef, true );
+		V_MergeOverviewRefdef( &cl.refdef ); 
+		if (host.vr_mode)
+		{
+			/* VR mode TRUE
+			Temp vars for preivious vector data.
+			Need to correct render Right Eye. */
+			vec3_t tmright;
+			vec3_t tmvieworg;
+			vec3_t tmup;
+			vec3_t tmforward;
+			vec3_t tmp, tmp2, tmp3;
+			float dist;
+			VectorCopy(cl.refdef.right, tmright);
+			VectorCopy(cl.refdef.forward, tmforward);
+			VectorCopy(cl.refdef.up, tmup);
+			VectorCopy(cl.refdef.vieworg, tmvieworg);
+			dist = Cvar_VariableValue("vr_dist");
+			if (dist == 0)
+			{
+				dist = 0.4;
+			}
+			else if (dist > 0.8)
+			{
+				cl.refdef.fov_x = 60;
+				cl.refdef.fov_y = 67.5;
+			}
+			//Left eye
+			{
+				VectorScale(cl.refdef.right, -dist / 2, tmp);
+				VectorAdd(cl.refdef.vieworg, tmp, cl.refdef.vieworg);
+				VectorScale(cl.refdef.up, 1, tmp2);
+				VectorScale(cl.refdef.forward, 1.5, tmp3);
+				VectorAdd(cl.refdef.vieworg, tmp2, cl.refdef.vieworg);
+				VectorAdd(cl.refdef.vieworg, tmp3, cl.refdef.vieworg);
+				R_RenderFrame(&cl.refdef, true);
+			}
+			//Right eye
+			{
+				cl.refdef.viewport[0] = cl.refdef.viewport[2] + cl.refdef.viewport[0];
+				cl.refdef.viewport[2] = cl.refdef.viewport[2];
+				RI.refdef.viewport[0] = cl.refdef.viewport[0] - cl.refdef.viewport[2];
+				RI.refdef.viewport[2] = cl.refdef.viewport[2] + cl.refdef.viewport[2];
+				VectorScale(tmright, dist / 2, tmp);
+				VectorAdd(tmvieworg, tmp, tmvieworg);
+				VectorScale(tmup, 1, tmp2);
+				VectorScale(tmforward, 1.5, tmp3);
+				VectorAdd(tmvieworg, tmp2, tmvieworg);
+				VectorAdd(tmvieworg, tmp3, cl.refdef.vieworg);
+				R_RenderFrame(&cl.refdef, true);
+			}
+		}
+		else
+
+			//No Vr mode
+
+		{
+			R_RenderFrame(&cl.refdef, true);
+		}
+		
 		cl.refdef.onlyClientDraw = false;
 	} while( cl.refdef.nextView );
 
@@ -332,7 +399,7 @@ V_RenderView
 */
 void V_RenderView( void )
 {
-	if( !cl.video_prepped || ( UI_IsVisible() && !cl.background ))
+	if( !cl.video_prepped || ( !ui_renderworld->value && UI_IsVisible() && !cl.background ))
 		return; // still loading
 
 	if( cl.frame.valid && ( cl.force_refdef || !cl.refdef.paused ))
@@ -397,9 +464,7 @@ void V_PostRender( void )
 	{
 		SCR_TileClear();
 		CL_DrawHUD( CL_ACTIVE );
-#ifdef XASH_VGUI
 		VGui_Paint();
-#endif
 	}
 
 	switch( cls.scrshot_action )

@@ -22,44 +22,17 @@ you do not wish to do so, delete this exception statement
 from your version.
 
 */
-#ifdef XASH_VGUI
+
 #include "vgui_main.h"
+namespace vgui_support {
 
 vguiapi_t *g_api;
 
 FontCache *g_FontCache = 0;
 
-CEnginePanel	*rootpanel = NULL;
+Panel	*rootpanel = NULL;
 CEngineSurface	*surface = NULL;
-CEngineApp          *pApp = NULL;
-
-SurfaceBase* CEnginePanel::getSurfaceBase( void )
-{
-	return surface;
-}
-
-App* CEnginePanel::getApp( void )
-{
-	return pApp;
-}
-
-void CEngineApp :: setCursorPos( int x, int y )
-{
-#ifdef XASH_SDL
-	//SDL_WarpMouseInWindow(host.hWnd, x, y);
-#endif
-}
-
-void CEngineApp :: getCursorPos( int &x,int &y )
-{
-	g_api->GetCursorPos( &x, &y );
-}
-
-void CEnginePanel :: setVisible(bool state)
-{
-	g_api->SetVisible(state);
-}
-
+CEngineApp          staticApp;
 
 void VGui_Startup( int width, int height )
 {
@@ -72,16 +45,15 @@ void VGui_Startup( int width, int height )
 		return;
 	}
 
-	rootpanel = new CEnginePanel;
+	rootpanel = new Panel;
 	rootpanel->setSize( width, height );
 	rootpanel->setPaintBorderEnabled( false );
 	rootpanel->setPaintBackgroundEnabled( false );
 	rootpanel->setVisible( true );
 	rootpanel->setCursor( new Cursor( Cursor::dc_none ));
 
-	pApp = new CEngineApp;
-	pApp->start();
-	pApp->setMinimumTickMillisInterval( 0 );
+	staticApp.start();
+	staticApp.setMinimumTickMillisInterval( 0 );
 
 	surface = new CEngineSurface( rootpanel );
 	rootpanel->setSurfaceBaseTraverse( surface );
@@ -95,15 +67,13 @@ void VGui_Startup( int width, int height )
 
 void VGui_Shutdown( void )
 {
-	if( pApp ) pApp->stop();
+	staticApp.stop();
 
 	delete rootpanel;
 	delete surface;
-	delete pApp;
 
 	rootpanel = NULL;
 	surface = NULL;
-	pApp = NULL;
 }
 
 void VGui_Paint( void )
@@ -123,7 +93,7 @@ void VGui_Paint( void )
 	rootpanel->getSize(w, h);
 	EnableScissor( true );
 
-	pApp->externalTick ();
+	staticApp.externalTick ();
 
 	pVPanel->setBounds( 0, 0, w, h );
 	pVPanel->repaint();
@@ -137,7 +107,11 @@ void *VGui_GetPanel( void )
 {
 	return (void *)rootpanel;
 }
+}
 
+#ifdef INTERNAL_VGUI_SUPPORT
+#define InitAPI InitVGUISupportAPI
+#endif
 
 #ifdef _WIN32
 extern "C" void _declspec( dllexport ) InitAPI(vguiapi_t * api)
@@ -154,4 +128,3 @@ extern "C" void InitAPI(vguiapi_t * api)
 	g_api->MouseMove = VGUI_MouseMove;
 	g_api->Key = VGUI_Key;
 }
-#endif

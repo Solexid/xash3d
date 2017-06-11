@@ -66,6 +66,8 @@ convar_t	*cl_maxpacket;
 convar_t    *r_bmodelinterp;
 
 convar_t	*hud_utf8;
+
+convar_t    *ui_renderworld;
 //
 // userinfo
 //
@@ -1010,6 +1012,7 @@ void CL_Disconnect( void )
 	Cvar_FullSet( "touch_enable", va( "%s", touch_enable->string ), touch_enable->flags & ~CVAR_READ_ONLY );
 	Cvar_FullSet( "m_ignore", va( "%s", m_ignore->string ), m_ignore->flags & ~CVAR_READ_ONLY );
 	Cvar_FullSet( "joy_enable", va( "%s", Cvar_VariableString( "joy_enable" ) ), CVAR_ARCHIVE );
+	Cbuf_InsertText( "menu_connectionprogress disconnect\n" );
 
 	// back to menu if developer mode set to "player" or "mapper"
 	if( host.developer > 2 ) return;
@@ -1732,18 +1735,25 @@ void CL_ProcessFile( qboolean successfully_received, const char *filename )
 	else
 		MsgDev( D_WARN, "Failed to download %s\n", filename );
 
-	if( cls.downloadfileid == cls.downloadcount - 1 )
+	if( downloadfileid == downloadcount - 1 )
 	{
 		MsgDev( D_INFO, "Download completed, resuming connection\n" );
 		FS_Rescan();
+
+		if( cls.state < ca_connecting )
+		{
+				Cbuf_AddText( "menu_connectionprogress dlend\n" );
+				return;
+		}
+
 		BF_WriteByte( &cls.netchan.message, clc_stringcmd );
 		BF_WriteString( &cls.netchan.message, "continueloading" );
-		cls.downloadfileid = 0;
-		cls.downloadcount = 0;
+		downloadfileid = 0;
+		downloadcount = 0;
 		return;
 	}
 
-	cls.downloadfileid++;
+	downloadfileid++;
 }
 
 //=============================================================================
@@ -1873,6 +1883,8 @@ void CL_InitLocal( void )
 	hud_scale = Cvar_Get( "hud_scale", "0", CVAR_ARCHIVE|CVAR_LATCH, "scale hud at current resolution" );
 	hud_utf8 = Cvar_Get( "hud_utf8", "0", CVAR_ARCHIVE, "Use utf-8 encoding for hud text" );
 
+	ui_renderworld = Cvar_Get( "ui_renderworld", "0", CVAR_ARCHIVE, "render world when UI is visible" );
+
 	Cvar_Get( "skin", "", CVAR_USERINFO, "player skin" ); // XDM 3.3 want this cvar
 	Cvar_Get( "cl_background", "0", CVAR_READ_ONLY, "indicates that background map is running" );
 
@@ -1989,9 +2001,7 @@ void Host_ClientFrame( void )
 		menu.globals->demorecording = cls.demorecording;
 	}
 
-#ifdef XASH_VGUI
 	VGui_RunFrame ();
-#endif
 
 	if( cls.initialized )
 	{
@@ -2008,7 +2018,12 @@ void Host_ClientFrame( void )
 			if( !cl.video_prepped ) CL_PrepVideo();
 			if( !cl.audio_prepped ) CL_PrepSound();
 		}
-	
+
+		// send a new command message to the server
+		CL_SendCommand();
+
+		// predict all unacknowledged movements
+		CL_PredictMovement();
 	}
 	// update the screen
 	SCR_UpdateScreen ();
@@ -2016,12 +2031,6 @@ void Host_ClientFrame( void )
 	{
 		// update audio
 		S_RenderFrame( &cl.refdef );
-
-		// send a new command message to the server
-		CL_SendCommand();
-
-		// predict all unacknowledged movements
-		CL_PredictMovement();
 
 		// decay dynamic lights
 		CL_DecayLights ();
@@ -2061,28 +2070,18 @@ void CL_Init( void )
 	BF_Init( &cls.datagram, "cls.datagram", cls.datagram_buf, sizeof( cls.datagram_buf ));
 
 	IN_TouchInit();
-#if TARGET_OS_IPHONE || defined __EMSCRIPTEN__
-	loaded = CL_LoadProgs( "client" );
-#elif defined (__ANDROID__)
-	{
-		char clientlib[256];
-		Q_snprintf( clientlib, sizeof(clientlib), "%s/" CLIENTDLL, getenv("XASH3D_GAMELIBDIR"));
-		loaded = CL_LoadProgs( clientlib );
 
-		if( !loaded )
-		{
-			Q_snprintf( clientlib, sizeof(clientlib), "%s/" CLIENTDLL, getenv("XASH3D_ENGLIBDIR"));
-			loaded = CL_LoadProgs( clientlib );
-		}
-	}
-#else
 	{
 		char clientlib[256];
 		Com_ResetLibraryError();
 		if( Sys_GetParmFromCmdLine( "-clientlib", clientlib ) )
 			loaded = CL_LoadProgs( clientlib );
 		else
+#ifdef XASH_INTERNAL_GAMELIBS
+			loaded = CL_LoadProgs( "client" );
+#else
 			loaded = CL_LoadProgs( va( "%s/%s" , GI->dll_path, SI.clientlib ));
+#endif
 		if( !loaded )
 		{
 
@@ -2090,7 +2089,7 @@ void CL_Init( void )
 
 		}
 	}
-#endif
+
 	if( loaded )
 	{
 		cls.initialized = true;

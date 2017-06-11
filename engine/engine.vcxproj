@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -18,13 +18,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v140_xp</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v140_xp</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
@@ -113,10 +113,7 @@
     <ClCompile Include="client\gl_rsurf.c" />
     <ClCompile Include="client\gl_sprite.c" />
     <ClCompile Include="client\gl_studio.c" />
-    <ClCompile Include="client\gl_vidnt.c" />
-    <ClCompile Include="client\gl_vidnt_common.c" />
     <ClCompile Include="client\gl_warp.c" />
-    <ClCompile Include="client\s_backend.c" />
     <ClCompile Include="client\s_dsp.c" />
     <ClCompile Include="client\s_load.c" />
     <ClCompile Include="client\s_main.c" />
@@ -131,13 +128,11 @@
     <ClCompile Include="common\build.c" />
     <ClCompile Include="common\cmd.c" />
     <ClCompile Include="common\common.c" />
-    <ClCompile Include="common\console.c" />
     <ClCompile Include="common\con_utils.c" />
     <ClCompile Include="common\crclib.c" />
     <ClCompile Include="common\crtlib.c" />
     <ClCompile Include="common\cvar.c" />
     <ClCompile Include="common\filesystem.c" />
-    <ClCompile Include="common\gamma.c" />
     <ClCompile Include="common\host.c" />
     <ClCompile Include="common\hpak.c" />
     <ClCompile Include="common\imagelib\img_bmp.c" />
@@ -148,9 +143,6 @@
     <ClCompile Include="common\imagelib\img_utils.c" />
     <ClCompile Include="common\imagelib\img_wad.c" />
     <ClCompile Include="common\infostring.c" />
-    <ClCompile Include="common\input.c" />
-    <ClCompile Include="common\joyinput.c" />
-    <ClCompile Include="common\keys.c" />
     <ClCompile Include="common\library.c" />
     <ClCompile Include="common\mathlib.c" />
     <ClCompile Include="common\matrixlib.c" />
@@ -162,18 +154,14 @@
     <ClCompile Include="common\net_encode.c" />
     <ClCompile Include="common\net_huff.c" />
     <ClCompile Include="common\pm_surface.c" />
-    <ClCompile Include="common\pm_trace.c" />
     <ClCompile Include="common\random.c" />
     <ClCompile Include="common\cfgscript.c" />
-    <ClCompile Include="common\sdl\events.c" />
     <ClCompile Include="common\soundlib\snd_main.c" />
     <ClCompile Include="common\soundlib\snd_mp3.c" />
     <ClCompile Include="common\soundlib\snd_utils.c" />
     <ClCompile Include="common\soundlib\snd_wav.c" />
     <ClCompile Include="common\sys_con.c" />
-    <ClCompile Include="common\sys_win.c" />
     <ClCompile Include="common\titles.c" />
-    <ClCompile Include="common\touch.c" />
     <ClCompile Include="common\world.c" />
     <ClCompile Include="common\zone.c" />
     <ClCompile Include="server\sv_client.c" />

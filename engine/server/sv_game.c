@@ -340,6 +340,12 @@ qboolean SV_Send( int dest, const vec3_t origin, const edict_t *ent, qboolean ex
 		return false;
 	}
 
+	if( !current )
+	{
+		MsgDev( D_ERROR, "SV_Send: client == NULL. Dest: %i\n", dest );
+		return false;
+	}
+
 	// send the data to all relevent clients (or once only)
 	for( j = 0, cl = current; j < numclients; j++, cl++ )
 	{
@@ -2775,7 +2781,7 @@ void GAME_EXPORT pfnWriteString( const char *src )
 	// prepare string to sending
 	dst = string;
 
-	while( 1 )
+	while( src )
 	{
 		// some escaped chars parsed as two symbols - merge it here
 		if( src[0] == '\\' && src[1] == 'n' )

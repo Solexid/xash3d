@@ -22,10 +22,8 @@ you do not wish to do so, delete this exception statement
 from your version.
 
 */
-#ifdef XASH_VGUI
-//#include "common.h"
-#define Assert(x)
-#include "vgui_api.h"
+
+#include "vgui_main.h"
 #include "wrect.h"
 	
 //-----------------------------------------------------------------------------
@@ -33,7 +31,7 @@ from your version.
 //-----------------------------------------------------------------------------
 static wrect_t g_ScissorRect;
 static qboolean g_bScissor = false;
-
+namespace vgui_support {
 //-----------------------------------------------------------------------------
 // Enable/disable scissoring...
 //-----------------------------------------------------------------------------
@@ -123,4 +121,4 @@ qboolean ClipRect( const vpoint_t &inUL, const vpoint_t &inLR, vpoint_t *pOutUL,
 	}
 	return true;
 }
-#endif
+}

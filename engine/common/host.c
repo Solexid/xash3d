@@ -20,7 +20,7 @@ GNU General Public License for more details.
 
 #include <stdarg.h>  // va_args
 #include <errno.h> // errno
-
+#include <string.h> // strerror
 
 #include "netchan.h"
 #include "server.h"
@@ -44,6 +44,8 @@ host_parm_t	host;	// host parms
 sysinfo_t		SI;
 
 convar_t	*host_serverstate;
+convar_t	*vr_mode;
+convar_t	*vr_dist;
 convar_t	*host_gameloaded;
 convar_t	*host_clientloaded;
 convar_t	*host_limitlocal;
@@ -177,7 +179,7 @@ void Host_EndGame( const char *message, ... )
 	static char	string[MAX_SYSPATH];
 	
 	va_start( argptr, message );
-	Q_vsprintf( string, message, argptr );
+	Q_vsnprintf( string, sizeof( string ), message, argptr );
 	va_end( argptr );
 
 	MsgDev( D_INFO, "Host_EndGame: %s\n", string );
@@ -787,7 +789,7 @@ void Host_Error( const char *error, ... )
 	}
 
 	va_start( argptr, error );
-	Q_vsprintf( hosterror1, error, argptr );
+	Q_vsnprintf( hosterror1, sizeof( hosterror1 ), error, argptr );
 	va_end( argptr );
 
 	CL_WriteMessageHistory (); // before Q_error call
@@ -947,29 +949,49 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 	}
 	else
 	{
-		#if TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE
 		const char *IOS_GetDocsDir();
 		Q_strncpy( host.rootdir, IOS_GetDocsDir(), sizeof(host.rootdir) );
-		#elif defined(XASH_SDL)
+#elif defined(XASH_SDL)
 		if( !( baseDir = SDL_GetBasePath() ) )
 			Sys_Error( "couldn't determine current directory: %s", SDL_GetError() );
 		Q_strncpy( host.rootdir, baseDir, sizeof( host.rootdir ) );
 		SDL_free( baseDir );
-		#else
+#else
 		if( !getcwd( host.rootdir, sizeof(host.rootdir) ) )
+		{
+			Sys_Error( "couldn't determine current directory: %s", strerror( errno ) );
 			host.rootdir[0] = 0;
-		#endif
+		}
+#endif
+	}
+
+	// get readonly root. The order is: check for arg, then env.
+	// If still not got it, rodir is disabled.
+	host.rodir[0] = 0;
+	if( !Sys_GetParmFromCmdLine( "-rodir", host.rodir ) )
+	{
+		char *roDir;
+
+		if( ( roDir = getenv( "XASH3D_RODIR" ) ) )
+		{
+			Q_strncpy( host.rodir, roDir, sizeof( host.rodir ) );
+		}
 	}
 
 	if( !Sys_CheckParm( "-disablehelp" ) )
 	{
 	    if( Sys_CheckParm( "-help" ) || Sys_CheckParm( "-h" ) || Sys_CheckParm( "--help" ) )
 	    {
-		Sys_Error( "%s", usage_str );
+			Sys_Error( "%s", usage_str );
 	    }
 	}
 	if( host.rootdir[Q_strlen( host.rootdir ) - 1] == '/' )
 		host.rootdir[Q_strlen( host.rootdir ) - 1] = 0;
+
+	if( host.rodir[Q_strlen( host.rodir ) - 1] == '/' )
+		host.rodir[Q_strlen( host.rodir ) - 1] = 0;
+
 
 	if( !Sys_CheckParm( "-noch" ) )
 	{
@@ -982,7 +1004,12 @@ void Host_InitCommon( int argc, const char** argv, const char *progname, qboolea
 	host.textmode = false;
 
 	host.mempool = Mem_AllocPool( "Zone Engine" );
-
+	host.vr_mode = false;
+	if (Sys_CheckParm("-vr"))
+		{
+		host.vr_mode = true;
+		Cvar_SetFloat("vr_mode", 1.0f);
+		}
 	if( Sys_CheckParm( "-console" )) host.developer = 1;
 	if( Sys_CheckParm( "-dev" ))
 	{
@@ -1117,7 +1144,8 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 		Cmd_AddCommand ( "crash", Host_Crash_f, "a way to force a bus error for development reasons");
 		Cmd_AddCommand ( "net_error", Net_Error_f, "send network bad message from random place");
 	}
-
+	vr_mode = Cvar_Get("vr_mode", "0", CVAR_ARCHIVE, "Virtual Reality mode");
+	vr_dist = Cvar_Get("vr_dist", "2", CVAR_ARCHIVE, "Virtual Reality frame mod");
 	host_cheats = Cvar_Get( "sv_cheats", "0", CVAR_LATCH, "allow usage of cheat commands and variables" );
 	host_maxfps = Cvar_Get( "fps_max", "72", CVAR_ARCHIVE, "host fps upper limit" );
 	host_sleeptime = Cvar_Get( "sleeptime", "1", CVAR_ARCHIVE, "higher value means lower accuracy" );
@@ -1131,7 +1159,7 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 	build = Cvar_Get( "build", va( "%i", Q_buildnum_compat()), CVAR_INIT, "returns an original xash3d build number. left for compability" );
 	ver = Cvar_Get( "ver", va( "%i/%g.%i", PROTOCOL_VERSION, BASED_VERSION, Q_buildnum_compat( ) ), CVAR_INIT, "shows an engine version. left for compabiltiy" );
 	host_build = Cvar_Get( "host_build", va("%i", Q_buildnum() ), CVAR_INIT, "returns current build number" );
-	host_ver = Cvar_Get( "host_ver", va("%i %s %s %s %s", Q_buildnum(), XASH_VERSION, Q_buildos(), Q_buildarch(), Q_buildcommit() ), CVAR_INIT, "detailed info about this build" );
+	host_ver = Cvar_Get( "host_ver", va("%i %s %s %s %s", Q_buildnum(), XASH_VERSION, "AndroidVR", Q_buildarch(), Q_buildcommit() ), CVAR_INIT, "detailed info about this build" );
 	host_mapdesign_fatal = Cvar_Get( "host_mapdesign_fatal", "1", CVAR_ARCHIVE, "make map design errors fatal" );
 	host_xashds_hacks = Cvar_Get( "xashds_hacks", "0", 0, "hacks for xashds in singleplayer" );
 
@@ -1177,7 +1205,7 @@ int EXPORT Host_Main( int argc, const char **argv, const char *progname, int bCh
 		Wcon_ShowConsole( false ); // hide console
 #endif
 		// execute startup config and cmdline
-		Cbuf_AddText( va( "exec %s.rc\n", SI.ModuleName ) );
+		Cbuf_AddText( va( "exec %s.rc\n", GI->gamedir ) );
 		CSCR_LoadDefaultCVars( "settings.scr" );
 		CSCR_LoadDefaultCVars( "user.scr" );
 		// intentional fallthrough

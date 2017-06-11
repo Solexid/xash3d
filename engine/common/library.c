@@ -100,7 +100,7 @@ int dladdr( const void *addr, Dl_info *info )
 #include <SDL_filesystem.h>
 #endif
 
-#ifdef TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE
 
 static void *IOS_LoadLibraryInternal( const char *dllname )
 {
@@ -137,6 +137,7 @@ static void *IOS_LoadLibraryInternal( const char *dllname )
 extern char *g_szLibrarySuffix;
 static void *IOS_LoadLibrary( const char *dllname )
 {
+
 	string name;
 	char *postfix = g_szLibrarySuffix;
 	char *pHandle;
@@ -155,17 +156,18 @@ static void *IOS_LoadLibrary( const char *dllname )
 
 void *Com_LoadLibrary( const char *dllname, int build_ordinals_table )
 {
-	searchpath_t	*search = NULL;
-	int		pack_ind;
-	char	path [MAX_SYSPATH];
-	void *pHandle;
+	dll_user_t *hInst;
 
+	// platforms where gameinfo mechanism is impossible
+	// or not implemented
 #if TARGET_OS_IPHONE
-	return IOS_LoadLibrary(dllname);
-#endif
-
-#ifdef __EMSCRIPTEN__
 	{
+		return IOS_LoadLibrary( dllname );
+	}
+#elif defined( __EMSCRIPTEN__ )
+	{
+		void *pHandle;
+		char path[MAX_SYSPATH];
 		string prefix;
 		Q_strcpy(prefix, getenv( "LIBRARY_PREFIX" ) );
 		Q_snprintf( path, MAX_SYSPATH, "%s%s%s",  prefix, dllname, getenv( "LIBRARY_SUFFIX" ) );
@@ -177,63 +179,70 @@ void *Com_LoadLibrary( const char *dllname, int build_ordinals_table )
 		}
 		return pHandle;
 	}
+#elif defined( __ANDROID__ )
+	{
+		void *pHandle;
+		char path[MAX_SYSPATH];
+		Q_snprintf( path, MAX_SYSPATH, "%s/lib%s"POSTFIX"."OS_LIB_EXT, getenv("XASH3D_GAMELIBDIR"), dllname );
+		pHandle = dlopen( path, RTLD_LAZY );
+		if( !pHandle )
+		{
+			Q_snprintf( path, MAX_SYSPATH, "%s/lib%s"POSTFIX"."OS_LIB_EXT, getenv("XASH3D_ENGLIBDIR"), dllname );
+			Com_PushLibraryError( dlerror() );
+			pHandle = dlopen( path, RTLD_LAZY );
+			if( !pHandle )
+				Com_PushLibraryError( dlerror() );
+		}
+		if( pHandle )
+			return pHandle;
+	}
 #endif
 
-	qboolean dll = host.enabledll && ( Q_stristr( dllname, ".dll" ) != 0 );
-#ifdef DLL_LOADER
-	if(dll)
+	// platforms where gameinfo mechanism is working goes here
+	// and use FS_FindLibrary
+	hInst = FS_FindLibrary( dllname, false );
+	if( !hInst )
 	{
-		pHandle = Loader_LoadLibrary( dllname );
-		if(!pHandle)
+		Com_PushLibraryError( va( "Failed to find library %s", dllname ));
+		return NULL;
+	}
+
+	if( hInst->custom_loader )
+	{
+		Com_PushLibraryError( va( "Custom library loader is not available. Extract library %s and fix gameinfo.txt!", hInst->fullPath ));
+		Mem_Free( hInst );
+		return NULL;
+	}
+
+#ifdef DLL_LOADER
+	if( host.enabledll && ( !Q_stricmp( FS_FileExtension( hInst->shortPath ), "dll" ) ) )
+	{
+		if( hInst->encrypted )
 		{
-			string errorstring;
-			Q_snprintf( errorstring, MAX_STRING, "Failed to load dll with dll loader: %s", dllname );
-			Com_PushLibraryError( errorstring );
+			Com_PushLibraryError( va( "Library %s is encrypted. Cannot load", hInst->shortPath ) );
+			Mem_Free( hInst );
+			return NULL;
+		}
+
+		if( !( hInst->hInstance = Loader_LoadLibrary( hInst->fullPath ) ) )
+		{
+			Com_PushLibraryError( va( "Failed to load DLL with DLL loader: %s", hInst->shortPath ) );
+			Mem_Free( hInst );
+			return NULL;
 		}
 	}
 	else
 #endif
 	{
-		pHandle = dlopen( dllname, RTLD_LAZY );
-		if( !pHandle )
-			Com_PushLibraryError(dlerror());
-	}
-	if(!pHandle)
-	{
-		search = FS_FindFile( dllname, &pack_ind, true );
-
-		if( !search )
+		if( !( hInst->hInstance = dlopen( hInst->fullPath, RTLD_LAZY ) ) )
 		{
-			return NULL;
-		}
-		sprintf( path, "%s%s", search->filename, dllname );
-
-
-#ifdef DLL_LOADER
-		if(dll)
-		{
-			pHandle = Loader_LoadLibrary( path );
-			if(!pHandle)
-			{
-				string errorstring;
-				Q_snprintf( errorstring, MAX_STRING, "Failed to load dll with dll loader: %s", dllname );
-				Com_PushLibraryError( errorstring );
-			}
-		}
-		else
-#endif
-		{
-			pHandle = dlopen( path, RTLD_LAZY );
-			if( !pHandle )
-				Com_PushLibraryError( dlerror() );
-		}
-		if(!pHandle)
-		{
+			Com_PushLibraryError( dlerror() );
+			Mem_Free( hInst );
 			return NULL;
 		}
 	}
 
-	return pHandle;
+	return hInst->hInstance;
 }
 
 void Com_FreeLibrary( void *hInstance )
@@ -267,15 +276,15 @@ void *Com_FunctionFromName( void *hInstance, const char *pName )
 		return Loader_GetProcAddress(hInstance, pName);
 	else
 #endif
-	function = dlsym( hInstance, pName );
-	if(!function)
+	if( !( function = dlsym( hInstance, pName ) ) )
 	{
 #ifdef __ANDROID__
 		// Shitty Android's dlsym don't resolve weak symbols
-		function = dlsym_weak( hInstance, pName );
-		if(!function)
+		if( !( function = dlsym_weak( hInstance, pName ) ) )
 #endif
+		{
 			MsgDev(D_ERROR, "FunctionFromName: Can't get symbol %s: %s\n", pName, dlerror());
+		}
 	}
 	return function;
 }
@@ -314,6 +323,8 @@ const char *Com_NameForFunction( void *hInstance, void *function )
 	}
 #ifdef XASH_ALLOW_SAVERESTORE_OFFSETS
 	return Com_OffsetNameForFunction( function );
+#else
+	return NULL;
 #endif
 }
 #elif defined __amd64__
